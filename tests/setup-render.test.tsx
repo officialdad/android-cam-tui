@@ -1,6 +1,7 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, mock, test } from "bun:test"
 import { act } from "react"
 import { testRender } from "@opentui/react/test-utils"
+import type { StreamConfig } from "../src/config"
 import { checks, type Env } from "../src/doctor"
 import type { CameraInfo } from "../src/scrcpy/probe"
 import { Setup } from "../src/ui/setup"
@@ -33,11 +34,42 @@ const CAMERAS: CameraInfo[] = [
 ]
 
 /**
+ * `t.waitFor`/`t.waitForFrame` only ride the renderer's *already-scheduled* render queue —
+ * their loop bails the instant `getSchedulerState()` reports nothing pending, which is true
+ * right after `release()`: React hasn't dispatched the update through a real event-loop turn
+ * yet, and `preflight`'s own `loadConfig()` is a real fs read those helpers' microtask-only
+ * draining can't force to completion either. Both need an actual timer tick, so this polls
+ * with one — same shape as the `waitFor` tests/runner.test.ts added in 029778f for the same
+ * reason, just checking rendered text instead of an event count.
+ *
+ * Call this *outside* any wrapping `act(...)`: this renderer defers committing frames to a
+ * still-open `act` callback until that callback returns, so a predicate read from inside one
+ * never observes the update it's polling for and just burns the full timeout. Keep `act`
+ * around the key press alone; poll after it resolves.
+ */
+async function pollFrame(t: Awaited<ReturnType<typeof testRender>>, pred: (frame: string) => boolean, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs
+  while (true) {
+    await new Promise((r) => setTimeout(r, 5))
+    await t.flush()
+    const frame = t.captureCharFrame()
+    if (pred(frame)) return frame
+    if (Date.now() > deadline) throw new Error(`timed out waiting for frame:\n${frame}`)
+  }
+}
+
+/**
  * `env` is read fresh on every probe, so a test can heal the environment between the
  * mount and an `r`. The first probe is held behind a gate until we are inside `act`:
  * the mount effect fires immediately and React warns about updates that land outside it.
  */
-async function render(env: () => Env, cams: CameraInfo[], width = 80, height = 24) {
+async function render(
+  env: () => Env,
+  cams: CameraInfo[],
+  width = 80,
+  height = 24,
+  onStart: (c: StreamConfig) => void = () => {},
+) {
   let release!: () => void
   const gate = new Promise<void>((r) => (release = r))
   const probes = {
@@ -47,12 +79,11 @@ async function render(env: () => Env, cams: CameraInfo[], width = 80, height = 2
       return env()
     },
   }
-  const t = await testRender(<Setup onStart={() => {}} probes={probes} />, { width, height })
+  const t = await testRender(<Setup onStart={onStart} probes={probes} />, { width, height })
   await act(async () => {
     release()
-    await new Promise((r) => setTimeout(r, 60))
-    await t.flush()
   })
+  await pollFrame(t, (frame) => !frame.includes("Probing phone cameras…"))
   return t
 }
 
@@ -119,9 +150,8 @@ describe("Setup → Doctor", () => {
     env = HEALTHY
     await act(async () => {
       t.mockInput.pressKey("r")
-      await new Promise((r) => setTimeout(r, 60))
-      await t.flush()
     })
+    await pollFrame(t, (frame) => frame.includes("android-cam-tui — setup"))
 
     const frame = t.captureCharFrame()
     expect(frame).toContain("android-cam-tui — setup")
@@ -138,5 +168,40 @@ describe("Setup → Doctor", () => {
     expect(frame).toContain("no cameras on R5CT")
     expect(frame).toContain("scrcpy 2.1 is too old")
     expect(frame).toContain("r to re-check")
+  })
+
+  // Regression for the `refreshEnv()` change in `toggleTransport`: it sets `checkList`
+  // from a fresh probe while `config`/`cameras` survive from the earlier healthy preflight,
+  // so pressing `w` and losing the phone lands on the doctor screen with `config` still
+  // non-null. `goWireless`/`goUsb` are the spawn wrapper around real `adb` calls (see
+  // src/scrcpy/devices.ts) and are not injectable through `props.probes`, so they are faked
+  // at the module boundary — the same pure/spawner seam CLAUDE.md calls out elsewhere.
+  test("Enter on the doctor screen does not start a stream once w lands there", async () => {
+    await mock.module("../src/scrcpy/devices", () => ({
+      goWireless: async () => "10.0.0.5:5555",
+      goUsb: async () => undefined,
+    }))
+    try {
+      let env: Env = HEALTHY
+      let started: StreamConfig | null = null
+      const t = await render(() => env, CAMERAS, 80, 24, (c) => (started = c))
+      expect(t.captureCharFrame()).toContain("android-cam-tui — setup")
+
+      // The phone drops off wifi mid-toggle: the fresh probe behind `w` reports blocking
+      // checks while the config picked during the healthy preflight above is untouched.
+      env = BARE
+      await act(async () => {
+        t.mockInput.pressKey("w")
+      })
+      await pollFrame(t, (frame) => frame.includes("missing dependencies"))
+
+      await act(async () => {
+        t.mockInput.pressKey("RETURN")
+      })
+
+      expect(started).toBeNull()
+    } finally {
+      mock.restore()
+    }
   })
 })

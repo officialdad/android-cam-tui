@@ -207,6 +207,7 @@ export function Setup(props: {
     const env = await probesRef.current.getEnv()
     setCheckList(checks(env))
     setDevices(env.devices)
+    setSinks(env.sinks)
     return env.devices
   }
 
@@ -238,7 +239,14 @@ export function Setup(props: {
     }
   }
 
+  // A block check failing hands the whole screen to <Doctor>, but this handler stays
+  // mounted regardless (useKeyboard is global) — every one of Setup's own keys, not just
+  // `return`, has to no-op while that screen owns the keyboard. Doctor's own `r` handler
+  // is a separate useKeyboard and keeps working.
+  const blocked = checkList?.some((c) => c.level === "block" && !c.ok) ?? false
+
   useKeyboard((key) => {
+    if (blocked) return
     if (capturing.current) return // a filter query is being typed — don't steal the keystrokes
     if (key.name === "tab") {
       const step = key.shift ? -1 : 1
@@ -254,8 +262,8 @@ export function Setup(props: {
   const cam = cameras?.find((c) => c.id === config?.cameraId)
   const sizes = useMemo(() => (cam ? annotateSizes(camSizes(cam)) : []), [cam])
 
-  if (checkList?.some((c) => c.level === "block" && !c.ok)) {
-    return <Doctor checks={checkList} busy={busy} onRecheck={() => void preflight()} />
+  if (blocked) {
+    return <Doctor checks={checkList!} busy={busy} onRecheck={() => void preflight()} />
   }
   if (!cameras || !config || !cam) return <text>Probing phone cameras…</text>
 
