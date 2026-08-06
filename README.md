@@ -16,11 +16,23 @@ face unlock, camera app opened).
 - Phone: USB debugging enabled, plugged in, **unlocked** (Android kills
   camera access for adb clients when the keyguard engages)
 
+## Install
+
+```bash
+git clone https://github.com/officialdad/android-cam-tui
+cd android-cam-tui
+bun install
+bun start
+```
+
+`bun run build` produces a standalone binary at `dist/android-cam-tui` with no
+Bun needed at runtime (scrcpy/adb/v4l2-ctl are still required).
+
 ## Run
 
 ```bash
-bun install
-bun start
+bun start            # setup screen
+bun start --start    # skip setup, stream the last-used config
 ```
 
 Setup screen: a device row, then three columns — camera, resolution, and output
@@ -61,10 +73,34 @@ anyone on the network who is already `adb`-authorised on that phone can connect.
 
 Wireless adds jitter — raise `buffer` (`--v4l2-buffer`, in ms) if the feed stutters.
 
-Dashboard: `z` cycle zoom presets, `l` cycle camera, `r` restart,
-`s` back to setup, `q` quit.
+## Dashboard
+
+`z` cycle zoom presets, `l` cycle camera, `t` toggle the camera torch (fill
+light), `p` open a preview window, `r` restart, `s` back to setup, `q` quit.
+
+Every camera parameter is fixed when the capture session opens, so zoom, torch
+and camera changes restart the stream — the sink drops for about a second.
+
+`p` shells out to whichever of `ffplay`, `mpv` or `vlc` is installed and points
+it at the sink, since scrcpy itself runs with `--no-window`. The preview window
+is detached: close it yourself, it survives stream restarts.
+
+## Recovering from failures
+
+The stream is supervised. When it dies, the exit code **and scrcpy's own last
+error line** are logged, then it restarts with an exponential backoff, giving up
+after 6 attempts so a config the phone rejects can't respawn forever. `r` clears
+the count and retries. A stream that stayed up over a minute before dying starts
+from a fresh budget, so a phone that locks once an hour never exhausts it.
+
+Quitting — `q`, Ctrl+C, or a crash — kills scrcpy with it, so the camera and the
+v4l2 sink are released rather than left busy for the next run.
 
 To check the UI without a phone attached, `bun run demo` renders the setup
 screen against fixture cameras.
 
 Last-used config persists at `~/.config/android-cam-tui/config.json`.
+
+## License
+
+MIT

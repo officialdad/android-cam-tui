@@ -1,12 +1,19 @@
 {
   "name": "android-cam-tui",
-  "module": "index.ts",
+  "version": "0.1.0",
+  "description": "Terminal UI for using an Android phone as a Linux webcam, via scrcpy and v4l2loopback",
+  "license": "MIT",
+  "repository": "github:officialdad/android-cam-tui",
+  "keywords": ["scrcpy", "v4l2loopback", "webcam", "android", "tui", "opentui"],
   "type": "module",
-  "private": true,
+  "bin": { "android-cam-tui": "src/index.tsx" },
+  "files": ["src", "README.md", "LICENSE"],
   "scripts": {
     "start": "bun run src/index.tsx",
     "demo": "bun run src/ui/demo.tsx",
-    "typecheck": "tsc --noEmit"
+    "build": "bun build --compile --outfile dist/android-cam-tui src/index.tsx",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
   },
   "devDependencies": {
     "@types/bun": "latest",
