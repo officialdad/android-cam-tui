@@ -71,6 +71,7 @@ export function Setup(props: { onStart: (c: StreamConfig) => void }) {
         <select
           focused={field === "camera"}
           options={camOptions}
+          selectedIndex={Math.max(0, cameras.findIndex((c) => c.id === config.cameraId))}
           onChange={(_, o) => {
             if (!o) return
             const next = cameras.find((c) => c.id === o.value)!
@@ -88,6 +89,7 @@ export function Setup(props: { onStart: (c: StreamConfig) => void }) {
         <select
           focused={field === "size"}
           options={sizeOptions}
+          selectedIndex={Math.max(0, cam.sizes.indexOf(config.size))}
           onChange={(_, o) => o && setConfig({ ...config, size: String(o.value) })}
         />
       </box>
@@ -95,6 +97,7 @@ export function Setup(props: { onStart: (c: StreamConfig) => void }) {
         <select
           focused={field === "fps"}
           options={fpsOptions}
+          selectedIndex={Math.max(0, cam.fps.indexOf(config.fps))}
           onChange={(_, o) => o && setConfig({ ...config, fps: Number(o.value) })}
         />
       </box>
@@ -116,6 +119,7 @@ export function Setup(props: { onStart: (c: StreamConfig) => void }) {
         <select
           focused={field === "sink"}
           options={sinkOptions}
+          selectedIndex={Math.max(0, sinks.findIndex((s) => s.path === config.sink))}
           onChange={(_, o) => o && setConfig({ ...config, sink: String(o.value) })}
         />
       </box>
