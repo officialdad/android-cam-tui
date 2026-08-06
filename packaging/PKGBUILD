@@ -1,0 +1,26 @@
+# Maintainer: opariffazman <opariffazman@gmail.com>
+pkgname=android-cam-tui-bin
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Terminal UI for using an Android phone as a Linux webcam, via scrcpy and v4l2loopback"
+arch=('x86_64' 'aarch64')
+url="https://github.com/officialdad/android-cam-tui"
+license=('MIT')
+depends=('scrcpy>=3.0' 'android-tools' 'v4l-utils' 'v4l2loopback-dkms')
+optdepends=('ffmpeg: preview window'
+            'mpv: preview window'
+            'vlc: preview window')
+provides=('android-cam-tui')
+conflicts=('android-cam-tui')
+install="$pkgname.install"
+source=("LICENSE-$pkgver::$url/raw/v$pkgver/LICENSE")
+source_x86_64=("$pkgname-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/android-cam-tui-linux-x64.tar.gz")
+source_aarch64=("$pkgname-$pkgver-aarch64.tar.gz::$url/releases/download/v$pkgver/android-cam-tui-linux-arm64.tar.gz")
+sha256sums=('e63d105c68bd498494a00fea7fad35ee03f1797fe35467171672f7270dce963d')
+sha256sums_x86_64=('fbc696426af5d13314096cfcfc3a0c270dfc32e455b9587eb99128699dc7e656')
+sha256sums_aarch64=('40da67cb2cd86a52a4bbefd7ba1297c4603bbe314bd07017ec475a96d05a5ab7')
+
+package() {
+  install -Dm755 "$srcdir/android-cam-tui" "$pkgdir/usr/bin/android-cam-tui"
+  install -Dm644 "$srcdir/LICENSE-$pkgver" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
