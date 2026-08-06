@@ -31,13 +31,21 @@ function collect() {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/** Poll instead of budgeting wall-clock — a loaded CI runner misses a fixed sleep. */
+async function waitFor(pred: () => boolean, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs
+  while (!pred() && Date.now() < deadline) await sleep(10)
+}
+
 describe("StreamRunner", () => {
   test("classifies eviction death and auto-restarts", async () => {
     const { events, onEvent } = collect()
     process.env.MODE = "die-evicted"
     const r = new StreamRunner({ scrcpyPath: FAKE, adbPath: "true", restartDelayMs: 50, onEvent })
     await r.start(DEFAULT_CONFIG)
-    await sleep(700) // fake dies at ~200ms, restart at ~250ms, dies again ~450ms
+    // fake dies at ~200ms, restarts 50ms later, dies again — wait for the second restart
+    const restarts = () => events.filter((e) => e.kind === "restarting").length
+    await waitFor(() => restarts() >= 2)
     await r.stop()
     const kinds = events.map((e) => e.kind)
     expect(kinds).toContain("started")
