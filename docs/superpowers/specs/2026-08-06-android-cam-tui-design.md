@@ -38,8 +38,9 @@ choose; the dashboard model was picked explicitly.
 - Status: running / restarting / dead, uptime, drop counter.
 - Event log: last 10 classified events (camera evicted, device disconnected,
   restart, phone locked).
-- Hotkeys: `z` cycle zoom presets, `l` cycle lens, `r` force restart, `s` stop
-  and return to Setup, `q` quit.
+- Hotkeys: `z` cycle zoom presets (within current camera), `l` cycle camera id
+  (back logical / front), `r` force restart, `s` stop and return to Setup,
+  `q` quit.
 - Any option change restarts scrcpy under the hood (~3 s). The v4l2 sink stays
   open across restarts, so consuming apps see a frozen frame, not a lost
   device.
