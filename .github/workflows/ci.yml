@@ -15,3 +15,4 @@ jobs:
       - run: bun run typecheck
       - run: bun test
       - run: sh -n install.sh
+      - run: shellcheck install.sh # preinstalled on the runner

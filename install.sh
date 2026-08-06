@@ -7,9 +7,20 @@ set -eu
 REPO=officialdad/android-cam-tui
 PREFIX=${PREFIX:-$HOME/.local/bin}
 
+# The releases are Linux ELF binaries and the whole point is a v4l2loopback sink, which
+# only exists on Linux. Without this a mac reports arm64 and installs an unrunnable file.
+if [ "$(uname -s)" != Linux ]; then
+  echo "android-cam-tui is Linux-only — it streams into a v4l2loopback device" >&2
+  exit 1
+fi
+
+for cmd in curl tar sha256sum; do
+  command -v "$cmd" >/dev/null || { echo "need $cmd on PATH to install" >&2; exit 1; }
+done
+
 case $(uname -m) in
   x86_64) ARCH=x64 ;;
-  aarch64 | arm64) ARCH=arm64 ;;
+  aarch64) ARCH=arm64 ;;
   *)
     echo "unsupported architecture $(uname -m) — releases cover x86_64 and aarch64" >&2
     exit 1
@@ -43,13 +54,16 @@ case ":$PATH:" in
       bash) rc=$HOME/.bashrc ;;
       fish)
         rc=$HOME/.config/fish/config.fish
-        line="fish_add_path $PREFIX"
+        line="fish_add_path \"$PREFIX\""
         ;;
       *) rc="" ;;
     esac
     if [ -z "$rc" ]; then
       echo "add this to your shell rc: $line"
-    elif grep -qF "$PREFIX" "$rc" 2>/dev/null; then
+    # Whole-line match: a bare substring search hits any unrelated mention of the path —
+    # a comment, another tool's line, a longer path — and then we skip the append and the
+    # user gets "command not found". A duplicate append is the safer way to be wrong.
+    elif grep -qxF "$line" "$rc" 2>/dev/null; then
       echo "$rc already puts $PREFIX on PATH — open a new shell to pick it up"
     else
       mkdir -p "$(dirname "$rc")"
