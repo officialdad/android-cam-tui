@@ -3,6 +3,7 @@ import { DEFAULT_CONFIG } from "../src/config"
 import { StreamRunner, type StreamEvent } from "../src/scrcpy/runner"
 
 const FAKE = new URL("./fixtures/fake-scrcpy.sh", import.meta.url).pathname
+const SLOW_ADB = new URL("./fixtures/slow-adb.sh", import.meta.url).pathname
 
 function collect() {
   const events: StreamEvent[] = []
@@ -39,5 +40,18 @@ describe("StreamRunner", () => {
     await sleep(200)
     expect(r.state).toBe("stopped")
     expect(events.map((e) => e.kind)).not.toContain("restarting")
+  })
+
+  test("start/stop race: stop() during prepPhone() prevents spawn", async () => {
+    const { events, onEvent } = collect()
+    process.env.MODE = "run-forever"
+    const r = new StreamRunner({ scrcpyPath: FAKE, adbPath: SLOW_ADB, restartDelayMs: 50, onEvent })
+    const startPromise = r.start(DEFAULT_CONFIG)
+    await sleep(50) // stop during prepPhone (which sleeps 200ms)
+    await r.stop()
+    await startPromise
+    await sleep(100) // wait for any pending spawns
+    expect(r.state).toBe("stopped")
+    expect(events.map((e) => e.kind)).not.toContain("started")
   })
 })

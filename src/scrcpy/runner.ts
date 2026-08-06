@@ -38,6 +38,7 @@ export class StreamRunner {
     this.config = config
     this.attempt = 0
     await this.prepPhone()
+    if (this.state === "stopped") return // stop() called during prepPhone()
     this.spawn()
   }
 
@@ -106,6 +107,7 @@ export class StreamRunner {
     await new Promise((r) => setTimeout(r, this.restartDelayMs))
     if (this.state !== "restarting") return // stopped during backoff
     await this.prepPhone()
+    if (this.state !== "restarting") return // stopped during prepPhone()
     this.spawn()
   }
 }
