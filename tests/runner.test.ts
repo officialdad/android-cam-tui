@@ -54,4 +54,17 @@ describe("StreamRunner", () => {
     expect(r.state).toBe("stopped")
     expect(events.map((e) => e.kind)).not.toContain("started")
   })
+
+  test("restart() works and generates two started events", async () => {
+    const { events, onEvent } = collect()
+    process.env.MODE = "run-forever"
+    const r = new StreamRunner({ scrcpyPath: FAKE, adbPath: "true", restartDelayMs: 50, onEvent })
+    await r.start(DEFAULT_CONFIG)
+    await sleep(100)
+    await r.restart(DEFAULT_CONFIG)
+    await sleep(100)
+    expect(r.state).toBe("running")
+    const startedEvents = events.filter((e) => e.kind === "started")
+    expect(startedEvents.length).toBe(2)
+  })
 })

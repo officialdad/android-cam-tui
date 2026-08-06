@@ -22,6 +22,7 @@ export class StreamRunner {
   private proc: Bun.Subprocess | null = null
   private config!: StreamConfig
   private attempt = 0
+  private epoch = 0
   private readonly scrcpyPath: string
   private readonly adbPath: string
   private readonly restartDelayMs: number
@@ -37,8 +38,10 @@ export class StreamRunner {
   async start(config: StreamConfig): Promise<void> {
     this.config = config
     this.attempt = 0
+    const myEpoch = ++this.epoch
+    this.state = "idle"
     await this.prepPhone()
-    if (this.state === "stopped") return // stop() called during prepPhone()
+    if (this.epoch !== myEpoch) return // stop() or newer start() superseded us
     this.spawn()
   }
 
@@ -48,6 +51,7 @@ export class StreamRunner {
   }
 
   async stop(): Promise<void> {
+    this.epoch++
     this.state = "stopped"
     if (this.proc) {
       this.proc.kill()
@@ -100,14 +104,15 @@ export class StreamRunner {
 
   private async onExit(code: number | null): Promise<void> {
     if (this.state !== "running") return
+    const myEpoch = this.epoch
     this.onEvent({ kind: "exited", code })
     this.attempt += 1
     this.state = "restarting"
     this.onEvent({ kind: "restarting", attempt: this.attempt })
     await new Promise((r) => setTimeout(r, this.restartDelayMs))
-    if (this.state !== "restarting") return // stopped during backoff
+    if (this.epoch !== myEpoch) return // stop() called, abort restart
     await this.prepPhone()
-    if (this.state !== "restarting") return // stopped during prepPhone()
+    if (this.epoch !== myEpoch) return // stop() called during prepPhone()
     this.spawn()
   }
 }
