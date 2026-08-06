@@ -3,6 +3,9 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "start": "bun run src/index.tsx"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/react": "^19.2.18"
