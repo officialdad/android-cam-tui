@@ -1,5 +1,5 @@
-import type { DeviceInfo } from "./scrcpy/devices"
-import type { SinkInfo } from "./scrcpy/probe"
+import { listDevices, type DeviceInfo } from "./scrcpy/devices"
+import { probeSinks, type SinkInfo } from "./scrcpy/probe"
 
 export type Distro = "arch" | "debian" | "fedora" | "suse" | "unknown"
 
@@ -201,4 +201,38 @@ export function checks(env: Env): Check[] {
       fix: ["install one of ffmpeg (ffplay), mpv or vlc"],
     },
   ]
+}
+
+const PLAYERS = ["ffplay", "mpv", "vlc"]
+
+/** Never rejects: every failure becomes a null field, so the doctor is always renderable. */
+export async function probeEnv(): Promise<Env> {
+  const scrcpy = Bun.which("scrcpy")
+  const [sinks, devices, osRelease, versionText] = await Promise.all([
+    probeSinks(),
+    listDevices(),
+    Bun.file("/etc/os-release").text().catch(() => ""),
+    scrcpy ? run([scrcpy, "--version"]) : Promise.resolve(""),
+  ])
+  return {
+    scrcpy,
+    adb: Bun.which("adb"),
+    v4l2ctl: Bun.which("v4l2-ctl"),
+    player: PLAYERS.map((p) => Bun.which(p)).find((p) => p !== null) ?? null,
+    scrcpyVersion: parseScrcpyVersion(versionText),
+    sinks,
+    devices,
+    distro: detectDistro(osRelease),
+  }
+}
+
+async function run(cmd: string[]): Promise<string> {
+  try {
+    const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" })
+    const out = await new Response(proc.stdout as ReadableStream).text()
+    await proc.exited
+    return out
+  } catch {
+    return ""
+  }
 }

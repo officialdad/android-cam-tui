@@ -73,18 +73,28 @@ export async function probeCameras(
   scrcpyPath = "scrcpy",
   serial?: string | null,
 ): Promise<CameraInfo[]> {
-  const proc = Bun.spawn([scrcpyPath, ...cameraArgs(serial)], { stderr: "pipe", stdout: "pipe" })
+  let proc: Bun.Subprocess
+  try {
+    proc = Bun.spawn([scrcpyPath, ...cameraArgs(serial)], { stderr: "pipe", stdout: "pipe" })
+  } catch {
+    throw new Error(`${scrcpyPath} not found — is scrcpy installed and on PATH?`)
+  }
   const [out, err] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
+    new Response(proc.stdout as ReadableStream).text(),
+    new Response(proc.stderr as ReadableStream).text(),
   ])
   await proc.exited
   return parseCameras(out + "\n" + err)
 }
 
 export async function probeSinks(): Promise<SinkInfo[]> {
-  const proc = Bun.spawn(["v4l2-ctl", "--list-devices"], { stdout: "pipe", stderr: "ignore" })
-  const out = await new Response(proc.stdout).text()
+  let proc: Bun.Subprocess
+  try {
+    proc = Bun.spawn(["v4l2-ctl", "--list-devices"], { stdout: "pipe", stderr: "ignore" })
+  } catch {
+    return [] // no v4l2-ctl — the doctor reports that as its own check
+  }
+  const out = await new Response(proc.stdout as ReadableStream).text()
   await proc.exited
   return parseSinks(out)
 }
