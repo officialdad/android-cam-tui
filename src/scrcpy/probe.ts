@@ -94,7 +94,11 @@ export async function probeSinks(): Promise<SinkInfo[]> {
   } catch {
     return [] // no v4l2-ctl — the doctor reports that as its own check
   }
-  const out = await new Response(proc.stdout as ReadableStream).text()
-  await proc.exited
-  return parseSinks(out)
+  try {
+    const out = await new Response(proc.stdout as ReadableStream).text()
+    await proc.exited
+    return parseSinks(out)
+  } catch {
+    return [] // v4l2-ctl spawned but died mid-read — same result, different cause
+  }
 }
