@@ -62,12 +62,14 @@ export class StreamRunner {
 
   private async prepPhone(): Promise<void> {
     // Samsung evicts adb camera clients the moment the keyguard engages.
+    const sel = this.config.serial ? ["-s", this.config.serial] : [] // must precede `shell`
     for (const args of [
       ["shell", "input", "keyevent", "KEYCODE_WAKEUP"],
       ["shell", "wm", "dismiss-keyguard"],
     ]) {
       try {
-        await Bun.spawn([this.adbPath, ...args], { stdout: "ignore", stderr: "ignore" }).exited
+        await Bun.spawn([this.adbPath, ...sel, ...args], { stdout: "ignore", stderr: "ignore" })
+          .exited
       } catch {
         // phone prep is best-effort
       }

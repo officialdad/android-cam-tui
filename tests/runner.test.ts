@@ -1,9 +1,21 @@
 import { describe, expect, test } from "bun:test"
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { DEFAULT_CONFIG } from "../src/config"
 import { StreamRunner, type StreamEvent } from "../src/scrcpy/runner"
 
 const FAKE = new URL("./fixtures/fake-scrcpy.sh", import.meta.url).pathname
 const SLOW_ADB = new URL("./fixtures/slow-adb.sh", import.meta.url).pathname
+
+/** Throwaway fake adb that records each invocation's argv, same injection seam as SLOW_ADB. */
+function recordingAdb() {
+  const dir = mkdtempSync(join(tmpdir(), "adb-argv-"))
+  const bin = join(dir, "adb")
+  const log = join(dir, "argv.log")
+  writeFileSync(bin, `#!/bin/sh\necho "$@" >> ${log}\n`, { mode: 0o755 })
+  return { bin, argv: () => (existsSync(log) ? readFileSync(log, "utf8").trimEnd().split("\n") : []) }
+}
 
 function collect() {
   const events: StreamEvent[] = []
@@ -53,6 +65,29 @@ describe("StreamRunner", () => {
     await sleep(100) // wait for any pending spawns
     expect(r.state).toBe("stopped")
     expect(events.map((e) => e.kind)).not.toContain("started")
+  })
+
+  test("prepPhone() argv is unchanged when no serial is set", async () => {
+    const { onEvent } = collect()
+    process.env.MODE = "run-forever"
+    const adb = recordingAdb()
+    const r = new StreamRunner({ scrcpyPath: FAKE, adbPath: adb.bin, restartDelayMs: 50, onEvent })
+    await r.start(DEFAULT_CONFIG)
+    await r.stop()
+    expect(adb.argv()).toEqual(["shell input keyevent KEYCODE_WAKEUP", "shell wm dismiss-keyguard"])
+  })
+
+  test("prepPhone() puts -s <serial> before the shell subcommand", async () => {
+    const { onEvent } = collect()
+    process.env.MODE = "run-forever"
+    const adb = recordingAdb()
+    const r = new StreamRunner({ scrcpyPath: FAKE, adbPath: adb.bin, restartDelayMs: 50, onEvent })
+    await r.start({ ...DEFAULT_CONFIG, serial: "192.168.1.5:5555" })
+    await r.stop()
+    expect(adb.argv()).toEqual([
+      "-s 192.168.1.5:5555 shell input keyevent KEYCODE_WAKEUP",
+      "-s 192.168.1.5:5555 shell wm dismiss-keyguard",
+    ])
   })
 
   test("restart() works and generates two started events", async () => {

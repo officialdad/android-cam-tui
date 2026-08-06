@@ -35,7 +35,7 @@ export function App(props: { onQuit: () => void }) {
       startingRef.current = true
       void saveConfig(c)
       try {
-        camerasRef.current = await probeCameras()
+        camerasRef.current = await probeCameras("scrcpy", c.serial)
         const runner = new StreamRunner({ onEvent: pushEvent })
         await runner.start(c)
         runnerRef.current = runner

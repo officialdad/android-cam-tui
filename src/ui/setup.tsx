@@ -1,47 +1,219 @@
-import { useEffect, useMemo, useState } from "react"
-import { useKeyboard } from "@opentui/react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useKeyboard, useTerminalDimensions } from "@opentui/react"
 import type { SelectOption } from "@opentui/core"
-import { buildArgs, loadConfig, type StreamConfig } from "../config"
+import { buildArgs, loadConfig, ORIENTATIONS, type StreamConfig } from "../config"
+import { goUsb, goWireless, listDevices, type DeviceInfo } from "../scrcpy/devices"
 import { probeCameras, probeSinks, type CameraInfo, type SinkInfo } from "../scrcpy/probe"
+import { annotateSizes } from "./sizes"
+import { FilteredSelect, Stepper } from "./widgets"
 
-const FIELDS = ["camera", "size", "fps", "zoom", "bitrate", "sink"] as const
+const FIELDS = ["device", "camera", "size", "fps", "zoom", "bitrate", "orientation", "buffer", "sink"] as const
 type Field = (typeof FIELDS)[number]
+const OUTPUT_FIELDS: Field[] = ["fps", "zoom", "bitrate", "orientation", "buffer", "sink"]
 
-export function Setup(props: { onStart: (c: StreamConfig) => void }) {
+const BITRATES = ["4M", "8M", "16M", "24M", "32M"]
+const ZOOM_PRESETS = [0.5, 0.6, 0.8, 1, 1.5, 2, 3, 5, 10]
+const BUFFERS = [0, 30, 60, 100, 200]
+
+const ORIENT_LABELS: Record<string, string> = {
+  "0": "none",
+  "90": "90°",
+  "180": "180°",
+  "270": "270°",
+  flip0: "flip",
+  flip90: "flip 90°",
+  flip180: "flip 180°",
+  flip270: "flip 270°",
+}
+
+/** "auto" plus presets strictly inside the camera's range, with both endpoints always reachable. */
+export function zoomStops(range: [number, number] | null): (number | null)[] {
+  if (!range) return [null]
+  const [lo, hi] = range
+  if (lo >= hi) return [null, lo]
+  return [null, lo, ...ZOOM_PRESETS.filter((z) => z > lo && z < hi), hi]
+}
+
+const zoomLabel = (z: number | null) => (z === null ? "auto" : `${z}x`)
+
+/** Keep a saved custom bitrate selectable instead of silently snapping it to a preset. */
+export function bitrateStops(current: string): string[] {
+  if (BITRATES.includes(current)) return BITRATES
+  return [...BITRATES, current].sort((a, b) => parseFloat(a) - parseFloat(b))
+}
+
+/** Normal sizes plus any reachable only in high-speed mode, deduped — most devices list both. */
+export function camSizes(cam: CameraInfo): string[] {
+  return [...new Set([...cam.sizes, ...Object.keys(cam.highSpeed)])]
+}
+
+export interface FpsStop {
+  fps: number
+  highSpeed: boolean
+}
+
+/**
+ * Frame rates this size can actually run at. The camera-level fps list only applies to
+ * sizes in the normal list; high-speed rates are per size and need a different flag, so
+ * fps and the mode are picked together rather than as two fields that can disagree.
+ */
+export function fpsStops(cam: CameraInfo, size: string): FpsStop[] {
+  const normal = cam.sizes.includes(size) ? cam.fps.map((fps) => ({ fps, highSpeed: false })) : []
+  const fast = (cam.highSpeed[size] ?? []).map((fps) => ({ fps, highSpeed: true }))
+  return [...normal, ...fast]
+}
+
+export const fpsLabel = (s: FpsStop) => (s.highSpeed ? `${s.fps} hs` : String(s.fps))
+
+export const deviceLabel = (d: DeviceInfo) =>
+  [d.serial, d.model, d.state === "device" ? (d.wireless ? "wifi" : "usb") : d.state].filter(Boolean).join("  ")
+
+/**
+ * Snap a saved config onto what the selected phone actually reports. A config can
+ * name a camera, size or fps that this device does not have — after a device switch
+ * it almost always does — so every dependent field is re-validated together.
+ */
+export function reconcile(cfg: StreamConfig, cams: CameraInfo[], sinks: SinkInfo[]): StreamConfig {
+  const cam = cams.find((c) => c.id === cfg.cameraId) ?? cams[0]
+  const zoomOk = cfg.zoom !== null && cam.zoomRange && cfg.zoom >= cam.zoomRange[0] && cfg.zoom <= cam.zoomRange[1]
+  const all = camSizes(cam)
+  const size = all.includes(cfg.size) ? cfg.size : all[0]
+  const stops = fpsStops(cam, size)
+  // Prefer a normal rate on fallback: high-speed is opt-in, never inherited by accident.
+  const stop =
+    stops.find((s) => s.fps === cfg.fps && s.highSpeed === cfg.highSpeed) ??
+    stops.filter((s) => !s.highSpeed).at(-1) ??
+    stops.at(-1)
+  return {
+    ...cfg,
+    cameraId: cam.id,
+    size,
+    fps: stop?.fps ?? cfg.fps,
+    highSpeed: stop?.highSpeed ?? false,
+    zoom: zoomOk ? cfg.zoom : null,
+    sink: sinks.find((s) => s.path === cfg.sink)?.path ?? sinks[0]?.path ?? cfg.sink,
+  }
+}
+
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+export function Setup(props: {
+  onStart: (c: StreamConfig) => void
+  probes?: {
+    cameras(serial: string | null): Promise<CameraInfo[]>
+    sinks(): Promise<SinkInfo[]>
+    devices(): Promise<DeviceInfo[]>
+  }
+}) {
   const [cameras, setCameras] = useState<CameraInfo[] | null>(null)
   const [sinks, setSinks] = useState<SinkInfo[]>([])
+  const [devices, setDevices] = useState<DeviceInfo[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
   const [config, setConfig] = useState<StreamConfig | null>(null)
   const [field, setField] = useState<Field>("camera")
+  // A ref, not state: this guard must be true for the *same* keystroke that opens filter
+  // mode, and sibling useKeyboard handlers all fire before any re-render can land.
+  const capturing = useRef(false)
+  const { width } = useTerminalDimensions()
+  const wide = width >= 100
+
+  const getCameras = props.probes?.cameras ?? ((serial) => probeCameras("scrcpy", serial))
+  const getSinks = props.probes?.sinks ?? probeSinks
+  const getDevices = props.probes?.devices ?? listDevices
+  // The handlers below are created fresh each render, so a ref keeps the effect's deps empty
+  // without them going stale.
+  const probesRef = useRef({ getCameras, getSinks, getDevices })
+  probesRef.current = { getCameras, getSinks, getDevices }
 
   useEffect(() => {
-    Promise.all([probeCameras(), probeSinks(), loadConfig()])
-      .then(([cams, sk, cfg]) => {
+    const { getCameras, getSinks, getDevices } = probesRef.current
+    Promise.all([getDevices(), getSinks(), loadConfig()])
+      .then(async ([devs, sk, cfg]) => {
+        setDevices(devs)
+        // Prefer the saved device, else the first one actually usable.
+        const pick = devs.find((d) => d.serial === cfg.serial) ?? devs.find((d) => d.state === "device") ?? devs[0]
+        const serial = pick?.serial ?? null
+        const cams = await getCameras(serial)
         if (cams.length === 0) {
-          setError("No cameras found — is the phone plugged in with USB debugging on?")
+          setError(
+            devs.length === 0
+              ? "No devices found — is the phone plugged in with USB debugging on?"
+              : `No cameras on ${pick?.serial}${pick && pick.state !== "device" ? ` (${pick.state})` : ""}`,
+          )
           return
         }
         setCameras(cams)
         setSinks(sk)
-        const validCam = cams.find((c) => c.id === cfg.cameraId) ?? cams[0]
-        const sink = sk.find((s) => s.path === cfg.sink)?.path ?? sk[0]?.path ?? cfg.sink
-        const size = validCam.sizes.includes(cfg.size) ? cfg.size : validCam.sizes[0]
-        const fps = validCam.fps.includes(cfg.fps) ? cfg.fps : validCam.fps[validCam.fps.length - 1]
-        const zoom =
-          cfg.zoom !== null && validCam.zoomRange && cfg.zoom >= validCam.zoomRange[0] && cfg.zoom <= validCam.zoomRange[1]
-            ? cfg.zoom
-            : null
-        setConfig({ ...cfg, cameraId: validCam.id, sink, size, fps, zoom })
+        setConfig(reconcile({ ...cfg, serial }, cams, sk))
       })
-      .catch((e) => setError(`Probe failed: ${e.message} — is scrcpy installed?`))
+      .catch((e) => setError(`Probe failed: ${errMsg(e)} — is scrcpy installed?`))
   }, [])
 
-  useKeyboard((key) => {
-    if (key.name === "tab") {
-      setField((f) => FIELDS[(FIELDS.indexOf(f) + 1) % FIELDS.length])
+  const selectDevice = async (serial: string) => {
+    if (!config) return
+    setBusy(true)
+    setNotice(null)
+    try {
+      const cams = await probesRef.current.getCameras(serial)
+      if (cams.length === 0) {
+        setNotice(`no cameras on ${serial}`)
+        return
+      }
+      setCameras(cams)
+      setConfig(reconcile({ ...config, serial }, cams, sinks))
+    } catch (e) {
+      setNotice(errMsg(e))
+    } finally {
+      setBusy(false)
     }
-    if (key.name === "return" && config) props.onStart(config)
+  }
+
+  const toggleTransport = async () => {
+    const current = devices.find((d) => d.serial === config?.serial)
+    if (!current) return setNotice("no device selected")
+    setBusy(true)
+    try {
+      if (current.wireless) {
+        setNotice("switching back to USB — the cable needs to be plugged in…")
+        await goUsb(current.serial)
+        const devs = await probesRef.current.getDevices()
+        setDevices(devs)
+        const usb = devs.find((d) => !d.wireless && d.state === "device")
+        // adbd is off the network now, so with no cable there is nothing left to talk to.
+        if (!usb) return setNotice("phone is off wifi — plug the USB cable back in")
+        await selectDevice(usb.serial)
+        setNotice(`usb: ${usb.serial}`)
+      } else {
+        setNotice("switching to wifi — this restarts adbd on the phone…")
+        const serial = await goWireless(current.serial)
+        setDevices(await probesRef.current.getDevices())
+        await selectDevice(serial)
+        setNotice(`wifi: ${serial} — USB cable can be unplugged now`)
+      }
+    } catch (e) {
+      setNotice(errMsg(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  useKeyboard((key) => {
+    if (capturing.current) return // a filter query is being typed — don't steal the keystrokes
+    if (key.name === "tab") {
+      const step = key.shift ? -1 : 1
+      setField((f) => FIELDS[(FIELDS.indexOf(f) + step + FIELDS.length) % FIELDS.length])
+    }
+    if (key.name === "1") setField("camera")
+    if (key.name === "2") setField("size")
+    if (key.name === "3") setField("fps")
+    if (key.name === "w" && !busy) void toggleTransport()
+    if (key.name === "return" && config && !busy) props.onStart(config)
   })
+
+  const cam = cameras?.find((c) => c.id === config?.cameraId)
+  const sizes = useMemo(() => (cam ? annotateSizes(camSizes(cam)) : []), [cam])
 
   if (error) {
     return (
@@ -51,89 +223,136 @@ export function Setup(props: { onStart: (c: StreamConfig) => void }) {
       </box>
     )
   }
-  if (!cameras || !config) return <text>Probing phone cameras…</text>
+  if (!cameras || !config || !cam) return <text>Probing phone cameras…</text>
 
-  const cam = cameras.find((c) => c.id === config.cameraId)!
   const camOptions: SelectOption[] = cameras.map((c) => ({
-    name: `${c.id}: ${c.facing} ${c.maxSize}`,
+    name: `${c.id}  ${c.facing.padEnd(5)} ${c.maxSize}`,
     description: c.zoomRange ? `zoom ${c.zoomRange[0]}–${c.zoomRange[1]}` : "",
     value: c.id,
   }))
-  const sizeOptions: SelectOption[] = cam.sizes.map((s) => ({ name: s, description: "", value: s }))
-  const fpsOptions: SelectOption[] = cam.fps.map((f) => ({ name: String(f), description: "", value: String(f) }))
-  const sinkOptions: SelectOption[] =
-    sinks.length > 0
-      ? sinks.map((s) => ({ name: s.path, description: s.label, value: s.path }))
-      : [{ name: "none found", description: "load v4l2loopback first", value: config.sink }]
+  const sizeOptions: SelectOption[] = sizes.map((s) => ({ name: s.label, description: "", value: s.value }))
+
+  const stops = fpsStops(cam, config.size)
+  const zooms = zoomStops(cam.zoomRange)
+  const bitrates = bitrateStops(config.bitrate)
+  const sinkPaths = sinks.length > 0 ? sinks.map((s) => s.path) : [config.sink]
+  const sinkLabel = sinks.find((s) => s.path === config.sink)?.label
+  const deviceList = devices.length > 0 ? devices : [{ serial: config.serial ?? "?", model: "", wireless: false, state: "device" }]
+  const currentDevice = deviceList.find((d) => d.serial === config.serial)
+  const outputFocused = OUTPUT_FIELDS.includes(field)
 
   return (
-    <box style={{ border: true, padding: 1, flexDirection: "column", gap: 1 }} title="android-cam-tui — setup">
+    <box
+      style={{ border: true, padding: 1, flexDirection: "column", gap: 1, height: "100%" }}
+      title="android-cam-tui — setup"
+    >
+      <box style={{ flexDirection: "row", gap: 2 }}>
+        <Stepper
+          label="device"
+          compact
+          focused={field === "device"}
+          options={deviceList.map(deviceLabel)}
+          index={Math.max(0, deviceList.findIndex((d) => d.serial === config.serial))}
+          onChange={(i) => void selectDevice(deviceList[i].serial)}
+        />
+        <text fg="#888">{currentDevice?.wireless ? "w: back to usb" : "w: go wifi"}</text>
+      </box>
+      {notice && <text fg={busy ? "yellow" : "cyan"}>{notice}</text>}
       {sinks.length === 0 && (
         <text fg="yellow">
           No v4l2loopback sink. Run: sudo modprobe v4l2loopback exclusive_caps=1 card_label="Phone Cam"
         </text>
       )}
-      <box title={`camera${field === "camera" ? " *" : ""}`} style={{ border: true, height: 6 }}>
-        <select style={{ height: 4 }}
-          focused={field === "camera"}
-          options={camOptions}
-          selectedIndex={Math.max(0, cameras.findIndex((c) => c.id === config.cameraId))}
-          onChange={(_, o) => {
-            if (!o) return
-            const next = cameras.find((c) => c.id === o.value)!
-            setConfig({
-              ...config,
-              cameraId: next.id,
-              size: next.sizes.includes(config.size) ? config.size : next.sizes[0],
-              fps: next.fps.includes(config.fps) ? config.fps : next.fps[next.fps.length - 1],
-              zoom: null,
-            })
-          }}
-        />
-      </box>
-      <box title={`size${field === "size" ? " *" : ""}`} style={{ border: true, height: 6 }}>
-        <select style={{ height: 4 }}
-          focused={field === "size"}
-          options={sizeOptions}
-          selectedIndex={Math.max(0, cam.sizes.indexOf(config.size))}
-          onChange={(_, o) => o && setConfig({ ...config, size: String(o.value) })}
-        />
-      </box>
-      <box title={`fps${field === "fps" ? " *" : ""}`} style={{ border: true, height: 5 }}>
-        <select style={{ height: 3 }}
-          focused={field === "fps"}
-          options={fpsOptions}
-          selectedIndex={Math.max(0, cam.fps.indexOf(config.fps))}
-          onChange={(_, o) => o && setConfig({ ...config, fps: Number(o.value) })}
-        />
-      </box>
-      <box title={`zoom (blank = default)${field === "zoom" ? " *" : ""}`} style={{ border: true, height: 3 }}>
-        <input
-          focused={field === "zoom"}
-          placeholder={cam.zoomRange ? `${cam.zoomRange[0]}–${cam.zoomRange[1]}, e.g. 0.6` : "n/a"}
-          onInput={(v: string) => {
-            const n = Number(v)
-            setConfig({ ...config, zoom: v.trim() === "" || !Number.isFinite(n) ? null : n })
-          }}
-        />
-      </box>
-      <box title={`bitrate${field === "bitrate" ? " *" : ""}`} style={{ border: true, height: 3 }}>
-        <input
-          focused={field === "bitrate"}
-          placeholder={config.bitrate}
-          onInput={(v: string) => setConfig({ ...config, bitrate: v.trim() || "16M" })}
-        />
-      </box>
-      <box title={`sink${field === "sink" ? " *" : ""}`} style={{ border: true, height: 4 }}>
-        <select style={{ height: 2 }}
-          focused={field === "sink"}
-          options={sinkOptions}
-          selectedIndex={Math.max(0, sinks.findIndex((s) => s.path === config.sink))}
-          onChange={(_, o) => o && setConfig({ ...config, sink: String(o.value) })}
-        />
+      {/* Three stacked sections starve each other for rows on a short terminal, so when
+          there is no width for columns only the focused section is shown. Tab cycles them. */}
+      <box style={{ flexDirection: wide ? "row" : "column", gap: 1, flexGrow: 1 }}>
+        {(wide || field === "camera" || field === "device") && (
+          <FilteredSelect
+            title="1 camera"
+            focused={field === "camera"}
+            options={camOptions}
+            value={config.cameraId}
+            onCaptureChange={(c) => (capturing.current = c)}
+            onChange={(v) => {
+              const next = cameras.find((c) => c.id === v)!
+              setConfig(reconcile({ ...config, cameraId: next.id, zoom: null }, cameras, sinks))
+            }}
+          />
+        )}
+        {(wide || field === "size") && (
+          <FilteredSelect
+            title="2 resolution"
+            focused={field === "size"}
+            options={sizeOptions}
+            value={config.size}
+            onCaptureChange={(c) => (capturing.current = c)}
+            // A high-speed-only size cannot keep a normal fps (or the reverse), so re-snap.
+            onChange={(v) => setConfig(reconcile({ ...config, size: v }, cameras, sinks))}
+          />
+        )}
+        {(wide || outputFocused) && (
+          <box
+            title="3 output"
+            style={{
+              border: true,
+              borderColor: outputFocused ? "cyan" : undefined,
+              padding: 1,
+              gap: 1,
+              flexDirection: "column",
+              width: wide ? 34 : "100%",
+            }}
+          >
+            <Stepper
+              label="fps"
+              focused={field === "fps"}
+              options={stops.map(fpsLabel)}
+              index={Math.max(0, stops.findIndex((s) => s.fps === config.fps && s.highSpeed === config.highSpeed))}
+              onChange={(i) => setConfig({ ...config, fps: stops[i].fps, highSpeed: stops[i].highSpeed })}
+            />
+            <Stepper
+              label="zoom"
+              bar
+              focused={field === "zoom"}
+              options={zooms.map(zoomLabel)}
+              index={Math.max(0, zooms.indexOf(config.zoom))}
+              onChange={(i) => setConfig({ ...config, zoom: zooms[i] })}
+            />
+            <Stepper
+              label="bitrate"
+              focused={field === "bitrate"}
+              options={bitrates}
+              index={Math.max(0, bitrates.indexOf(config.bitrate))}
+              onChange={(i) => setConfig({ ...config, bitrate: bitrates[i] })}
+            />
+            <Stepper
+              label="rotate"
+              compact
+              focused={field === "orientation"}
+              options={ORIENTATIONS.map((o) => ORIENT_LABELS[o])}
+              index={Math.max(0, ORIENTATIONS.indexOf(config.orientation))}
+              onChange={(i) => setConfig({ ...config, orientation: ORIENTATIONS[i] })}
+            />
+            <Stepper
+              label="buffer"
+              focused={field === "buffer"}
+              options={BUFFERS.map((b) => (b === 0 ? "off" : String(b)))}
+              index={Math.max(0, BUFFERS.indexOf(config.v4l2Buffer))}
+              onChange={(i) => setConfig({ ...config, v4l2Buffer: BUFFERS[i] })}
+            />
+            <Stepper
+              label="sink"
+              compact
+              focused={field === "sink"}
+              options={sinkPaths}
+              index={Math.max(0, sinkPaths.indexOf(config.sink))}
+              onChange={(i) => setConfig({ ...config, sink: sinkPaths[i] })}
+            />
+            {sinkLabel && <text fg="#888">         {sinkLabel}</text>}
+          </box>
+        )}
       </box>
       <text fg="#888">scrcpy {buildArgs(config).join(" ")}</text>
-      <text fg="cyan">Tab: next field · Enter: start stream</text>
+      <text fg="cyan">↹ next · ⇧↹ prev · 1-3 jump · / filter · ↑↓ pick · ←→ adjust · w usb/wifi · ⏎ start</text>
     </box>
   )
 }

@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "start": "bun run src/index.tsx",
+    "demo": "bun run src/ui/demo.tsx",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

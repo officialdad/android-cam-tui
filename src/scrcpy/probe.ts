@@ -5,6 +5,8 @@ export interface CameraInfo {
   fps: number[]
   zoomRange: [number, number] | null
   sizes: string[]
+  /** Size -> frame rates reachable only via `--camera-high-speed`. Usually 120/240. */
+  highSpeed: Record<string, number[]>
 }
 
 export interface SinkInfo {
@@ -29,6 +31,7 @@ export function parseCameras(text: string): CameraInfo[] {
         fps: m[4].split(",").map((s) => Number(s.trim())),
         zoomRange: m[5] ? [Number(m[5]), Number(m[6])] : null,
         sizes: [],
+        highSpeed: {},
       }
       cams.push(current)
       inHighSpeed = false
@@ -38,8 +41,15 @@ export function parseCameras(text: string): CameraInfo[] {
       inHighSpeed = true
       continue
     }
-    const size = line.match(/^\s+- (\d+x\d+)\s*$/)
-    if (size && current && !inHighSpeed) current.sizes.push(size[1])
+    // High-speed entries carry their own rates: "- 1280x720 (fps={120, 240})". The
+    // camera-level fps list does not include them, so they are kept per size.
+    const size = line.match(/^\s+- (\d+x\d+)\s*(?:\(fps=\{([\d, ]+)\}\))?\s*$/)
+    if (!size || !current) continue
+    if (inHighSpeed) {
+      if (size[2]) current.highSpeed[size[1]] = size[2].split(",").map((s) => Number(s.trim()))
+    } else {
+      current.sizes.push(size[1])
+    }
   }
   return cams
 }
@@ -55,8 +65,15 @@ export function parseSinks(text: string): SinkInfo[] {
   return sinks
 }
 
-export async function probeCameras(scrcpyPath = "scrcpy"): Promise<CameraInfo[]> {
-  const proc = Bun.spawn([scrcpyPath, "--list-camera-sizes"], { stderr: "pipe", stdout: "pipe" })
+export function cameraArgs(serial?: string | null): string[] {
+  return serial ? ["-s", serial, "--list-camera-sizes"] : ["--list-camera-sizes"]
+}
+
+export async function probeCameras(
+  scrcpyPath = "scrcpy",
+  serial?: string | null,
+): Promise<CameraInfo[]> {
+  const proc = Bun.spawn([scrcpyPath, ...cameraArgs(serial)], { stderr: "pipe", stdout: "pipe" })
   const [out, err] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),

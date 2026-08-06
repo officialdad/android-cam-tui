@@ -52,23 +52,38 @@ export function Dashboard(props: {
   const drops = props.log.filter((l) => l.msg.startsWith("restarting")).length
   const stateColor = props.state === "running" ? "green" : props.state === "restarting" ? "yellow" : "red"
 
+  const fields: [string, string][] = [
+    ["camera", props.config.cameraId],
+    ["size", props.config.size],
+    ["fps", props.config.highSpeed ? `${props.config.fps} hs` : String(props.config.fps)],
+    ["bitrate", props.config.bitrate],
+    ["zoom", props.config.zoom === null ? "auto" : `${props.config.zoom}x`],
+    ["sink", props.config.sink],
+  ]
+
   return (
     <box style={{ border: true, padding: 1, flexDirection: "column", gap: 1 }} title="android-cam-tui — dashboard">
       <box style={{ flexDirection: "row", gap: 3 }}>
-        <text fg={stateColor}>{props.state.toUpperCase()}</text>
+        <text fg={stateColor}>● {props.state.toUpperCase()}</text>
         <text>up {Math.floor(uptime / 60)}m{uptime % 60}s</text>
         <text>drops {drops}</text>
       </box>
-      <text fg="#888">
-        cam {props.config.cameraId} · {props.config.size}@{props.config.fps} · {props.config.bitrate} · zoom{" "}
-        {props.config.zoom ?? "auto"} · {props.config.sink}
-      </text>
-      <box title="events" style={{ border: true, flexDirection: "column", height: 12 }}>
-        {props.log.slice(-10).map((l, i) => (
-          <text key={i} fg="#aaa">
-            {l.at} {l.msg}
-          </text>
-        ))}
+      <box style={{ flexDirection: "row", gap: 1, flexGrow: 1 }}>
+        <box title="stream" style={{ border: true, flexDirection: "column", width: 26 }}>
+          {fields.map(([k, v]) => (
+            <text key={k} fg="#aaa">
+              {k.padEnd(9)}
+              {v}
+            </text>
+          ))}
+        </box>
+        <scrollbox title="events" style={{ border: true, flexGrow: 1 }} stickyScroll stickyStart="bottom">
+          {props.log.map((l, i) => (
+            <text key={i} fg="#aaa">
+              {l.at} {l.msg}
+            </text>
+          ))}
+        </scrollbox>
       </box>
       <text fg="cyan">z: zoom · l: camera · r: restart · s: stop → setup · q: quit</text>
     </box>
