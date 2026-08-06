@@ -17,6 +17,13 @@ function recordingAdb() {
   return { bin, argv: () => (existsSync(log) ? readFileSync(log, "utf8").trimEnd().split("\n") : []) }
 }
 
+/** Throwaway fake scrcpy with the behaviour baked in — env vars don't reach spawned children here. */
+function fakeScrcpy(body: string) {
+  const bin = join(mkdtempSync(join(tmpdir(), "scrcpy-")), "scrcpy")
+  writeFileSync(bin, `#!/bin/sh\n${body}\n`, { mode: 0o755 })
+  return bin
+}
+
 function collect() {
   const events: StreamEvent[] = []
   return { events, onEvent: (e: StreamEvent) => events.push(e) }
@@ -88,6 +95,67 @@ describe("StreamRunner", () => {
       "-s 192.168.1.5:5555 shell input keyevent KEYCODE_WAKEUP",
       "-s 192.168.1.5:5555 shell wm dismiss-keyguard",
     ])
+  })
+
+  const DIES_WITH_ERROR = 'echo "ERROR: Could not open v4l2 device: /dev/video9" >&2\nexit 1'
+
+  test("surfaces scrcpy's error line with the exit code", async () => {
+    const { events, onEvent } = collect()
+    const r = new StreamRunner({
+      scrcpyPath: fakeScrcpy(DIES_WITH_ERROR),
+      adbPath: "true",
+      restartDelayMs: 10,
+      onEvent,
+    })
+    await r.start(DEFAULT_CONFIG)
+    await sleep(300)
+    await r.stop()
+    const exited = events.find((e) => e.kind === "exited") as Extract<StreamEvent, { kind: "exited" }>
+    expect(exited.code).toBe(1)
+    expect(exited.reason).toBe("ERROR: Could not open v4l2 device: /dev/video9")
+  })
+
+  test("gives up instead of respawning a config scrcpy rejects forever", async () => {
+    const { events, onEvent } = collect()
+    const r = new StreamRunner({
+      scrcpyPath: fakeScrcpy(DIES_WITH_ERROR),
+      adbPath: "true",
+      restartDelayMs: 10,
+      maxAttempts: 2,
+      onEvent,
+    })
+    await r.start(DEFAULT_CONFIG)
+    await sleep(1500)
+    expect(events.filter((e) => e.kind === "restarting").length).toBe(2)
+    const gaveUp = events.find((e) => e.kind === "gave-up") as Extract<StreamEvent, { kind: "gave-up" }>
+    expect(gaveUp?.attempts).toBe(2)
+    expect(r.state).toBe("stopped")
+    expect(events.filter((e) => e.kind === "started").length).toBe(3) // initial + 2 retries
+  })
+
+  test("kills scrcpy when the parent process exits", async () => {
+    const pidfile = join(mkdtempSync(join(tmpdir(), "orphan-")), "pid")
+    const scrcpy = fakeScrcpy(`echo $$ > ${pidfile}\nsleep 600`)
+    const runner = new URL("../src/scrcpy/runner.ts", import.meta.url).pathname
+    const config = new URL("../src/config.ts", import.meta.url).pathname
+    // A child that exits on its own, the way opentui's signal handlers exit on Ctrl+C.
+    const child = Bun.spawn(
+      [
+        "bun",
+        "-e",
+        `const { StreamRunner } = await import(${JSON.stringify(runner)})
+         const { DEFAULT_CONFIG } = await import(${JSON.stringify(config)})
+         const r = new StreamRunner({ scrcpyPath: ${JSON.stringify(scrcpy)}, adbPath: "true", onEvent() {} })
+         await r.start(DEFAULT_CONFIG)
+         setTimeout(() => process.exit(0), 200)`,
+      ],
+      { stdout: "ignore", stderr: "ignore" },
+    )
+    await child.exited
+    await sleep(200)
+    const pid = Number(readFileSync(pidfile, "utf8").trim())
+    expect(pid).toBeGreaterThan(0)
+    expect(() => process.kill(pid, 0)).toThrow() // reaped, not orphaned holding the sink
   })
 
   test("restart() works and generates two started events", async () => {
