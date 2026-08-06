@@ -15,35 +15,56 @@ export function App(props: { onQuit: () => void }) {
   const camerasRef = useRef<CameraInfo[]>([])
   const runnerRef = useRef<StreamRunner | null>(null)
 
-  const pushEvent = useCallback((e: StreamEvent) => {
+  const pushLog = useCallback((msg: string) => {
     const at = new Date().toTimeString().slice(0, 8)
-    setLog((l) => [...l.slice(-50), { at, msg: eventToLog(e) }])
-    bump((n) => n + 1)
+    setLog((l) => [...l.slice(-50), { at, msg }])
   }, [])
+
+  const pushEvent = useCallback(
+    (e: StreamEvent) => {
+      pushLog(eventToLog(e))
+      bump((n) => n + 1)
+    },
+    [pushLog],
+  )
 
   const start = useCallback(
     async (c: StreamConfig) => {
-      setConfig(c)
-      setScreen("dashboard")
       void saveConfig(c)
-      camerasRef.current = await probeCameras()
-      runnerRef.current = new StreamRunner({ onEvent: pushEvent })
-      await runnerRef.current.start(c)
+      try {
+        camerasRef.current = await probeCameras()
+        const runner = new StreamRunner({ onEvent: pushEvent })
+        await runner.start(c)
+        runnerRef.current = runner
+        setConfig(c)
+        setScreen("dashboard")
+      } catch (e) {
+        pushLog(`error: ${e instanceof Error ? e.message : String(e)}`)
+        setScreen("setup")
+      }
       bump((n) => n + 1)
     },
-    [pushEvent],
+    [pushEvent, pushLog],
   )
 
-  const applyConfig = useCallback(async (next: StreamConfig) => {
-    setConfig(next)
-    void saveConfig(next)
-    await runnerRef.current?.restart(next)
-    bump((n) => n + 1)
-  }, [])
+  const applyConfig = useCallback(
+    async (next: StreamConfig) => {
+      setConfig(next)
+      void saveConfig(next)
+      try {
+        await runnerRef.current?.restart(next)
+      } catch (e) {
+        pushLog(`error: ${e instanceof Error ? e.message : String(e)}`)
+      }
+      bump((n) => n + 1)
+    },
+    [pushLog],
+  )
 
   if (screen === "setup" || !config) return <Setup onStart={start} />
 
-  const runner = runnerRef.current!
+  const runner = runnerRef.current
+  if (!runner) return <text>starting…</text>
   return (
     <Dashboard
       config={config}
