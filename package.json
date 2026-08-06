@@ -3,9 +3,13 @@
   "version": "0.1.0",
   "description": "Terminal UI for using an Android phone as a Linux webcam, via scrcpy and v4l2loopback",
   "license": "MIT",
+  "author": "opariffazman",
   "repository": "github:officialdad/android-cam-tui",
+  "homepage": "https://github.com/officialdad/android-cam-tui#readme",
+  "bugs": "https://github.com/officialdad/android-cam-tui/issues",
   "keywords": ["scrcpy", "v4l2loopback", "webcam", "android", "tui", "opentui"],
   "type": "module",
+  "engines": { "bun": ">=1.3" },
   "bin": { "android-cam-tui": "src/index.tsx" },
   "files": ["src", "README.md", "LICENSE"],
   "scripts": {

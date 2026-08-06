@@ -1,5 +1,9 @@
 # android-cam-tui
 
+[![ci](https://github.com/officialdad/android-cam-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/officialdad/android-cam-tui/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/officialdad/android-cam-tui)](https://github.com/officialdad/android-cam-tui/releases/latest)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Terminal UI for using an Android phone as a Linux webcam via
 [scrcpy](https://github.com/Genymobile/scrcpy) and v4l2loopback.
 
@@ -12,28 +16,39 @@ face unlock, camera app opened).
 
 - Linux with `v4l2loopback` (`sudo modprobe v4l2loopback exclusive_caps=1 card_label="Phone Cam"`)
 - `scrcpy` ≥ 4.0, `adb`, `v4l2-ctl` on PATH
-- Bun
 - Phone: USB debugging enabled, plugged in, **unlocked** (Android kills
   camera access for adb clients when the keyguard engages)
 
 ## Install
 
+Standalone binaries are on the
+[latest release](https://github.com/officialdad/android-cam-tui/releases/latest) —
+`linux-x64` and `linux-arm64`, no Bun needed at runtime:
+
+```bash
+curl -fsSL https://github.com/officialdad/android-cam-tui/releases/latest/download/android-cam-tui-linux-x64.tar.gz | tar -xz
+./android-cam-tui
+```
+
+Each archive ships a `.sha256` next to it. From source instead (needs
+[Bun](https://bun.sh) ≥ 1.3):
+
 ```bash
 git clone https://github.com/officialdad/android-cam-tui
-cd android-cam-tui
-bun install
+cd android-cam-tui && bun install
 bun start
 ```
 
-`bun run build` produces a standalone binary at `dist/android-cam-tui` with no
-Bun needed at runtime (scrcpy/adb/v4l2-ctl are still required).
+`bun run build` rebuilds the same binary into `dist/`.
 
 ## Run
 
 ```bash
-bun start            # setup screen
-bun start --start    # skip setup, stream the last-used config
+./android-cam-tui            # setup screen
+./android-cam-tui --start    # skip setup, stream the last-used config
 ```
+
+From source, `bun start` and `bun start --start`.
 
 Setup screen: a device row, then three columns — camera, resolution, and output
 (fps/zoom/bitrate/rotate/buffer/sink), all probed live. `Tab`/`Shift-Tab` move

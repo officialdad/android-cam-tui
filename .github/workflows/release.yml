@@ -1,0 +1,50 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+      - run: bun run build
+      # @opentui/core ships a per-platform native lib, so each arch builds on its
+      # own runner — bun --compile --target= cannot cross-compile this.
+      - name: package
+        env:
+          NAME: android-cam-tui-linux-${{ matrix.arch }}
+        run: |
+          tar -czf "$NAME.tar.gz" -C dist android-cam-tui
+          sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-cam-tui-linux-${{ matrix.arch }}
+          path: android-cam-tui-linux-${{ matrix.arch }}.tar.gz*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - run: gh release create "$GITHUB_REF_NAME" --generate-notes artifacts/*
+        env:
+          GH_TOKEN: ${{ github.token }}
