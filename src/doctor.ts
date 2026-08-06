@@ -109,11 +109,17 @@ const PKGS: Record<Distro, Pkgs> = {
   },
 }
 
-/** Load it now, then keep it across reboots — the one-shot modprobe is lost at the next boot. */
+/**
+ * Load it now, then keep it across reboots — the one-shot modprobe is lost at the next boot.
+ * Every line stays under 76 columns: the doctor screen indents fix lines by two inside a
+ * bordered, padded box, so anything longer wraps mid-path at an 80-column terminal and the
+ * user pastes a broken command.
+ */
 const MODPROBE = [
   'sudo modprobe v4l2loopback exclusive_caps=1 card_label="Phone Cam"',
   "echo v4l2loopback | sudo tee /etc/modules-load.d/v4l2loopback.conf",
-  `printf 'options v4l2loopback exclusive_caps=1 card_label="Phone Cam"\\n' | sudo tee /etc/modprobe.d/v4l2loopback.conf`,
+  `echo 'options v4l2loopback exclusive_caps=1 card_label="Phone Cam"' \\`,
+  "  | sudo tee /etc/modprobe.d/v4l2loopback.conf",
 ]
 
 const atLeast = (v: [number, number], min: [number, number]) =>
@@ -121,11 +127,16 @@ const atLeast = (v: [number, number], min: [number, number]) =>
 
 export function checks(env: Env): Check[] {
   const pkg = PKGS[env.distro]
-  // The three device checks are mutually exclusive: one usable phone satisfies all of
-  // them, so a second handset stuck unauthorized never blocks a working session.
+  // The device checks are mutually exclusive: one usable phone satisfies all of them, so a
+  // second handset stuck unauthorized never blocks a working session.
   const usable = env.devices.some((d) => d.state === "device")
   const unauthorized = env.devices.some((d) => d.state === "unauthorized")
-  const broken = env.devices.find((d) => d.state !== "device" && d.state !== "unauthorized")
+  // `offline` is its own diagnosis: adb sees the phone but adbd is not answering — asleep,
+  // mid-boot, or restarting after `adb tcpip`. udev rules fix none of that.
+  const offline = env.devices.some((d) => d.state === "offline")
+  const broken = env.devices.find(
+    (d) => !["device", "unauthorized", "offline"].includes(d.state),
+  )
   const version = env.scrcpyVersion
 
   return [
@@ -179,6 +190,17 @@ export function checks(env: Env): Check[] {
       ],
     },
     {
+      id: "device-offline",
+      level: "block",
+      ok: usable || !offline,
+      detail: 'phone reports state "offline" — adbd is not answering',
+      fix: [
+        "unlock the phone and leave the screen on",
+        "adb kill-server && adb devices",
+        "if it stays offline, unplug and replug the cable",
+      ],
+    },
+    {
       id: "device-perms",
       level: "block",
       ok: usable || !broken,
@@ -191,7 +213,7 @@ export function checks(env: Env): Check[] {
       // A missing scrcpy is already the `scrcpy` block; do not report it twice.
       ok: env.scrcpy === null || version === null || atLeast(version, MIN_SCRCPY),
       detail: `scrcpy ${version?.join(".")} is too old for camera capture — needs ${MIN_SCRCPY.join(".")}+`,
-      fix: ["grab a prebuilt build: https://github.com/Genymobile/scrcpy/releases/latest"],
+      fix: ["prebuilt: https://github.com/Genymobile/scrcpy/releases/latest"],
     },
     {
       id: "player",

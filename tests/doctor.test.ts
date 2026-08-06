@@ -96,10 +96,28 @@ describe("checks", () => {
     expect(find({ ...OK, devices }, "device-perms").fix.join("\n")).toContain("android-udev")
   })
 
-  test("one usable device clears all three device checks", () => {
+  // An offline phone is asleep, mid-boot, or has an adbd restarting after `adb tcpip` —
+  // installing udev rules fixes none of that, so it must not land in `device-perms`.
+  test("an offline device gets its own check, not the udev one", () => {
+    const devices: DeviceInfo[] = [{ serial: "R5CT", model: "", wireless: false, state: "offline" }]
+    expect(blocked({ ...OK, devices })).toEqual(["device-offline"])
+    const fix = find({ ...OK, devices }, "device-offline").fix.join("\n")
+    expect(fix).toContain("adb kill-server")
+    expect(fix).not.toContain("udev")
+  })
+
+  test("states other than offline still reach the udev check", () => {
+    for (const state of ["no", "bootloader", "recovery", "sideload", "host"]) {
+      const devices: DeviceInfo[] = [{ serial: "R5CT", model: "", wireless: false, state }]
+      expect(blocked({ ...OK, devices })).toEqual(["device-perms"])
+    }
+  })
+
+  test("one usable device clears every device check", () => {
     const devices: DeviceInfo[] = [
       { serial: "R5CT", model: "", wireless: false, state: "device" },
       { serial: "OTHER", model: "", wireless: false, state: "unauthorized" },
+      { serial: "THIRD", model: "", wireless: false, state: "offline" },
     ]
     expect(blocked({ ...OK, devices })).toEqual([])
   })
@@ -124,6 +142,20 @@ describe("checks", () => {
     expect(find({ ...OK, adb: null }, "adb").fix).toEqual(["sudo pacman -S android-tools"])
     expect(find({ ...OK, adb: null, distro: "debian" }, "adb").fix).toEqual(["sudo apt install adb"])
     expect(find({ ...OK, adb: null, distro: "unknown" }, "adb").fix[0]).toContain("https://")
+  })
+
+  /**
+   * The doctor indents fix lines by two inside a bordered, padded box, so an 80-column
+   * terminal leaves 76. Past that the tail wraps to column one and reads as a second
+   * command — which is how a user ends up pasting a broken one. RPM Fusion's release-RPM
+   * URL is the one exemption: it is 95 characters by itself, so no hand-wrapping helps,
+   * and a wrapped URL at least still reads as one thing.
+   */
+  test("every fix line that can be wrapped by hand fits an 80-column screen", () => {
+    const long = (["arch", "debian", "fedora", "suse", "unknown"] as const)
+      .flatMap((distro) => checks({ ...OK, distro }).flatMap((c) => c.fix))
+      .filter((line) => line.length + 2 > 76 && !line.includes("rpmfusion"))
+    expect(long).toEqual([])
   })
 
   test("fedora enables RPM Fusion before installing scrcpy", () => {

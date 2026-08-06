@@ -151,9 +151,13 @@ The `sink` fix always ends with persistence, which the current hint omits:
 ```sh
 sudo modprobe v4l2loopback exclusive_caps=1 card_label="Phone Cam"
 echo v4l2loopback | sudo tee /etc/modules-load.d/v4l2loopback.conf
-printf 'options v4l2loopback exclusive_caps=1 card_label="Phone Cam"\n' \
+echo 'options v4l2loopback exclusive_caps=1 card_label="Phone Cam"' \
   | sudo tee /etc/modprobe.d/v4l2loopback.conf
 ```
+
+Every fix line stays under 76 columns. The doctor indents them by two inside a
+bordered, padded box, so at an 80-column terminal anything longer wraps to
+column one and reads as a second command — a user pasting it gets a broken one.
 
 ### `src/ui/doctor.tsx` — the failure screen
 
