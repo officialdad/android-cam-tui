@@ -1,0 +1,6 @@
+Brio 100 (usb-0000:00:14.0-3.2.1):
+	/dev/video0
+	/dev/video1
+
+Phone Cam (platform:v4l2loopback-000):
+	/dev/video3
