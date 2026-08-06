@@ -9,8 +9,9 @@ license=('MIT')
 depends=('scrcpy>=3.0' 'android-tools' 'v4l-utils' 'v4l2loopback-dkms')
 optdepends=('ffmpeg: preview window'
             'mpv: preview window'
-            'vlc: preview window')
-provides=('android-cam-tui')
+            'vlc: preview window'
+            'android-udev: adb access without root')
+provides=("android-cam-tui=$pkgver")
 conflicts=('android-cam-tui')
 install="$pkgname.install"
 source=("LICENSE-$pkgver::$url/raw/v$pkgver/LICENSE")

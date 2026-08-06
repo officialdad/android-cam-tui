@@ -55,8 +55,18 @@ for the detected distro. `Setup` renders `<Doctor>` instead of the setup screen
 when a `block` check fails. The doctor never runs a privileged command — new
 checks print a command, they do not execute one.
 
-`Bun.spawn` throws **synchronously** when the executable is missing, so every
-spawn wrapper needs a try around the spawn itself, not just around the await.
+`checkList` in `src/ui/setup.tsx` is the only source of user-facing dependency
+truth. A failure `checks()` cannot see (no cameras, a thrown preflight) is pushed
+onto it as a synthetic `block` entry so it renders through `<Doctor>` and inherits
+the warnings and the `r` key. Do not add a second error box. Fix lines must fit
+**76 columns** — the doctor indents them by two inside a bordered, padded box, so
+anything longer wraps at 80 and the user pastes a broken command.
+
+`Bun.spawn` throws **synchronously** when the executable is missing, so a new
+spawn wrapper wants its try around the spawn itself, not just around the await —
+that is what `probe.ts` and `devices.ts` do. `runner.ts` and `preview.ts` still
+spawn bare; both are only reachable once something else has proved the binary is
+there (a `block` check, `Bun.which`), so keep that guarantee if you move them.
 
 `adb`'s `-s <serial>` must precede the subcommand (`adb -s X shell ...`), and every
 scrcpy/adb call is serial-scoped so a USB and a wireless device can be attached at once.

@@ -24,8 +24,10 @@ for your distro:
 - Phone: USB debugging enabled, plugged in, **unlocked** (Android kills
   camera access for adb clients when the keyguard engages)
 
-The setup screen shows the same report when something is missing; fix it in
-another terminal and press `r` to re-check.
+When something on that list is missing the setup screen shows the same report
+instead of starting; fix it in another terminal and press `r` to re-check.
+Problems that only degrade things — an old scrcpy, no preview player — are one
+yellow line on the setup screen and do not stop you.
 
 ## Install
 
@@ -60,8 +62,8 @@ bun start
 ## Run
 
 ```bash
-./android-cam-tui            # setup screen
-./android-cam-tui --start    # skip setup, stream the last-used config
+android-cam-tui            # setup screen
+android-cam-tui --start    # skip setup, stream the last-used config
 ```
 
 From source, `bun start` and `bun start --start`.
