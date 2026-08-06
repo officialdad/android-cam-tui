@@ -15,7 +15,7 @@ jobs:
             arch: arm64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
@@ -29,7 +29,7 @@ jobs:
         run: |
           tar -czf "$NAME.tar.gz" -C dist android-cam-tui
           sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android-cam-tui-linux-${{ matrix.arch }}
           path: android-cam-tui-linux-${{ matrix.arch }}.tar.gz*
@@ -40,8 +40,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
