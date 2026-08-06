@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { DEFAULT_CONFIG } from "../src/config"
 import type { CameraInfo, SinkInfo } from "../src/scrcpy/probe"
-import { bitrateStops, camSizes, deviceLabel, fpsStops, reconcile, zoomStops } from "../src/ui/setup"
+import { bitrateStops, camSizes, deviceLabel, fpsStops, nextStop, reconcile, zoomStops } from "../src/ui/setup"
 
 const cams: CameraInfo[] = [
   { id: "0", facing: "back", maxSize: "4080x3060", fps: [24, 30, 60], zoomRange: [0.6, 10], sizes: ["1920x1080", "1280x720"], highSpeed: { "1280x720": [120, 240], "800x600": [240] } },
@@ -102,6 +102,19 @@ describe("deviceLabel", () => {
       "192.168.1.42:5555  SM_S911B  wifi",
     )
     expect(deviceLabel({ serial: "X1", model: "", wireless: false, state: "unauthorized" })).toBe("X1  unauthorized")
+  })
+})
+
+describe("nextStop", () => {
+  test("the dashboard z key visits every stop the setup screen offers", () => {
+    const stops = zoomStops([0.6, 10])
+    expect(stops).toContain(0.8)
+    expect(nextStop(stops, 0.6)).toBe(0.8) // not 1 — the two lists used to disagree
+    expect(nextStop(stops, 10)).toBeNull() // wraps to auto
+  })
+
+  test("a value outside the list lands on the first stop", () => {
+    expect(nextStop(zoomStops([1, 8]), 0.6)).toBeNull()
   })
 })
 

@@ -36,6 +36,11 @@ export function zoomStops(range: [number, number] | null): (number | null)[] {
 
 const zoomLabel = (z: number | null) => (z === null ? "auto" : `${z}x`)
 
+/** Next stop after `current`, wrapping. A value not in the list (a config from another phone) lands on the first. */
+export function nextStop<T>(stops: T[], current: T): T {
+  return stops[(stops.indexOf(current) + 1) % stops.length]
+}
+
 /** Keep a saved custom bitrate selectable instead of silently snapping it to a preset. */
 export function bitrateStops(current: string): string[] {
   if (BITRATES.includes(current)) return BITRATES

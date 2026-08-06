@@ -4,9 +4,7 @@ import { openPreview } from "./preview"
 import { probeCameras, type CameraInfo } from "./scrcpy/probe"
 import { StreamRunner, type StreamEvent } from "./scrcpy/runner"
 import { Dashboard, eventToLog, type LogLine } from "./ui/dashboard"
-import { Setup } from "./ui/setup"
-
-const ZOOM_PRESETS = [null, 0.6, 1, 3] as const
+import { nextStop, Setup, zoomStops } from "./ui/setup"
 
 export function App(props: { onQuit: () => void; autoStart?: boolean }) {
   const [screen, setScreen] = useState<"setup" | "dashboard" | "starting">(
@@ -86,12 +84,10 @@ export function App(props: { onQuit: () => void; autoStart?: boolean }) {
       startedAt={runner.startedAt}
       log={log}
       onZoomCycle={() => {
+        // The same stops the setup screen offers — a second list here made 0.8x pickable
+        // in setup and unreachable with `z`, and dropped a saved 0.8 to auto on first press.
         const cam = camerasRef.current.find((c) => c.id === config.cameraId)
-        const usable = ZOOM_PRESETS.filter(
-          (z) => z === null || (cam?.zoomRange && z >= cam.zoomRange[0] && z <= cam.zoomRange[1]),
-        )
-        const idx = usable.indexOf(config.zoom as (typeof usable)[number])
-        void applyConfig({ ...config, zoom: usable[(idx + 1) % usable.length] })
+        void applyConfig({ ...config, zoom: nextStop(zoomStops(cam?.zoomRange ?? null), config.zoom) })
       }}
       onCameraCycle={() => {
         const cams = camerasRef.current
