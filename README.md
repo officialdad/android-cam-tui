@@ -12,6 +12,8 @@ streams the one you pick into a virtual webcam device, and supervises the
 stream — auto-restarting when Android evicts the camera (phone locked,
 face unlock, camera app opened).
 
+![setup screen](docs/demo.gif)
+
 ## Requirements
 
 - Linux with `v4l2loopback` (`sudo modprobe v4l2loopback exclusive_caps=1 card_label="Phone Cam"`)
@@ -112,7 +114,9 @@ Quitting — `q`, Ctrl+C, or a crash — kills scrcpy with it, so the camera and
 v4l2 sink are released rather than left busy for the next run.
 
 To check the UI without a phone attached, `bun run demo` renders the setup
-screen against fixture cameras.
+screen against fixture cameras. That is also what the GIF above records —
+`vhs docs/demo.tape` regenerates it (needs [vhs](https://github.com/charmbracelet/vhs),
+`ttyd` and `ffmpeg`).
 
 Last-used config persists at `~/.config/android-cam-tui/config.json`.
 
