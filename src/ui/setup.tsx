@@ -74,7 +74,7 @@ export function Setup(props: { onStart: (c: StreamConfig) => void }) {
         </text>
       )}
       <box title={`camera${field === "camera" ? " *" : ""}`} style={{ border: true, height: 6 }}>
-        <select
+        <select style={{ height: 4 }}
           focused={field === "camera"}
           options={camOptions}
           selectedIndex={Math.max(0, cameras.findIndex((c) => c.id === config.cameraId))}
@@ -92,7 +92,7 @@ export function Setup(props: { onStart: (c: StreamConfig) => void }) {
         />
       </box>
       <box title={`size${field === "size" ? " *" : ""}`} style={{ border: true, height: 6 }}>
-        <select
+        <select style={{ height: 4 }}
           focused={field === "size"}
           options={sizeOptions}
           selectedIndex={Math.max(0, cam.sizes.indexOf(config.size))}
@@ -100,7 +100,7 @@ export function Setup(props: { onStart: (c: StreamConfig) => void }) {
         />
       </box>
       <box title={`fps${field === "fps" ? " *" : ""}`} style={{ border: true, height: 5 }}>
-        <select
+        <select style={{ height: 3 }}
           focused={field === "fps"}
           options={fpsOptions}
           selectedIndex={Math.max(0, cam.fps.indexOf(config.fps))}
@@ -125,7 +125,7 @@ export function Setup(props: { onStart: (c: StreamConfig) => void }) {
         />
       </box>
       <box title={`sink${field === "sink" ? " *" : ""}`} style={{ border: true, height: 4 }}>
-        <select
+        <select style={{ height: 2 }}
           focused={field === "sink"}
           options={sinkOptions}
           selectedIndex={Math.max(0, sinks.findIndex((s) => s.path === config.sink))}
