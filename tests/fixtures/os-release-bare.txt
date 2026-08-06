@@ -1,0 +1,2 @@
+NAME="Some Linux"
+VERSION="1"
