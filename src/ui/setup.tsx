@@ -104,6 +104,13 @@ export function reconcile(cfg: StreamConfig, cams: CameraInfo[], sinks: SinkInfo
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
+/**
+ * A failure the probe found rather than one `checks()` can see. Pushed onto the same
+ * `checkList` so it renders through `<Doctor>` alongside the real warnings — `checkList`
+ * is the only source of user-facing dependency truth in this file.
+ */
+const blocker = (id: string, detail: string, fix: string[]): Check => ({ id, level: "block", ok: false, detail, fix })
+
 export function Setup(props: {
   onStart: (c: StreamConfig) => void
   probes?: {
@@ -114,7 +121,6 @@ export function Setup(props: {
   const [cameras, setCameras] = useState<CameraInfo[] | null>(null)
   const [sinks, setSinks] = useState<SinkInfo[]>([])
   const [devices, setDevices] = useState<DeviceInfo[]>([])
-  const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [config, setConfig] = useState<StreamConfig | null>(null)
@@ -135,9 +141,11 @@ export function Setup(props: {
 
   const preflight = useCallback(async () => {
     setBusy(true)
+    // Rebuilt from scratch every run, so a healed environment leaves no stale diagnosis.
+    let list: Check[] = []
     try {
       const env = await probesRef.current.getEnv()
-      const list = checks(env)
+      list = checks(env)
       setCheckList(list)
       setDevices(env.devices)
       setSinks(env.sinks)
@@ -151,13 +159,21 @@ export function Setup(props: {
       const serial = pick?.serial ?? null
       const cams = await probesRef.current.getCameras(serial)
       if (cams.length === 0) {
-        setError(`No cameras on ${pick?.serial} — scrcpy reported none for this phone`)
+        // Routed through Doctor so the `scrcpy-version` warning rides along: "no cameras"
+        // plus "you are on scrcpy 2.1" is the actual diagnosis, and `r` comes for free.
+        setCheckList([
+          ...list,
+          blocker("cameras", `no cameras on ${pick?.serial ?? "this phone"} — scrcpy reported none`, [
+            "unlock the phone — Android hides the cameras behind the keyguard",
+            `scrcpy${serial ? ` -s ${serial}` : ""} --list-cameras`,
+          ]),
+        ])
         return
       }
       setCameras(cams)
       setConfig(reconcile({ ...cfg, serial }, cams, env.sinks))
     } catch (e) {
-      setError(`Preflight failed: ${errMsg(e)}`)
+      setCheckList([...list, blocker("preflight", `preflight failed: ${errMsg(e)}`, [])])
     } finally {
       setBusy(false)
     }
@@ -186,6 +202,14 @@ export function Setup(props: {
     }
   }
 
+  /** Re-probe after a transport change: the check list has to move with the device list. */
+  const refreshEnv = async () => {
+    const env = await probesRef.current.getEnv()
+    setCheckList(checks(env))
+    setDevices(env.devices)
+    return env.devices
+  }
+
   const toggleTransport = async () => {
     const current = devices.find((d) => d.serial === config?.serial)
     if (!current) return setNotice("no device selected")
@@ -194,8 +218,7 @@ export function Setup(props: {
       if (current.wireless) {
         setNotice("switching back to USB — the cable needs to be plugged in…")
         await goUsb(current.serial)
-        const devs = (await probesRef.current.getEnv()).devices
-        setDevices(devs)
+        const devs = await refreshEnv()
         const usb = devs.find((d) => !d.wireless && d.state === "device")
         // adbd is off the network now, so with no cable there is nothing left to talk to.
         if (!usb) return setNotice("phone is off wifi — plug the USB cable back in")
@@ -204,8 +227,7 @@ export function Setup(props: {
       } else {
         setNotice("switching to wifi — this restarts adbd on the phone…")
         const serial = await goWireless(current.serial)
-        const devs = (await probesRef.current.getEnv()).devices
-        setDevices(devs)
+        await refreshEnv()
         await selectDevice(serial)
         setNotice(`wifi: ${serial} — USB cable can be unplugged now`)
       }
@@ -234,14 +256,6 @@ export function Setup(props: {
 
   if (checkList?.some((c) => c.level === "block" && !c.ok)) {
     return <Doctor checks={checkList} busy={busy} onRecheck={() => void preflight()} />
-  }
-  if (error) {
-    return (
-      <box style={{ border: true, padding: 1, flexDirection: "column" }}>
-        <text fg="red">{error}</text>
-        <text fg="#888">Fix and restart. USB debugging: Settings → Developer options.</text>
-      </box>
-    )
   }
   if (!cameras || !config || !cam) return <text>Probing phone cameras…</text>
 
