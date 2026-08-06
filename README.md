@@ -11,7 +11,7 @@ face unlock, camera app opened).
 ## Requirements
 
 - Linux with `v4l2loopback` (`sudo modprobe v4l2loopback exclusive_caps=1 card_label="Phone Cam"`)
-- `scrcpy` ≥ 2.2, `adb`, `v4l2-ctl` on PATH
+- `scrcpy` ≥ 4.0, `adb`, `v4l2-ctl` on PATH
 - Bun
 - Phone: USB debugging enabled, plugged in, **unlocked** (Android kills
   camera access for adb clients when the keyguard engages)

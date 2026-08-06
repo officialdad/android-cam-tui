@@ -14,6 +14,7 @@ export function App(props: { onQuit: () => void }) {
   const [, bump] = useState(0) // re-render on runner state changes
   const camerasRef = useRef<CameraInfo[]>([])
   const runnerRef = useRef<StreamRunner | null>(null)
+  const startingRef = useRef(false)
 
   const pushLog = useCallback((msg: string) => {
     const at = new Date().toTimeString().slice(0, 8)
@@ -30,6 +31,8 @@ export function App(props: { onQuit: () => void }) {
 
   const start = useCallback(
     async (c: StreamConfig) => {
+      if (startingRef.current || runnerRef.current) return
+      startingRef.current = true
       void saveConfig(c)
       try {
         camerasRef.current = await probeCameras()
@@ -41,6 +44,7 @@ export function App(props: { onQuit: () => void }) {
       } catch (e) {
         pushLog(`error: ${e instanceof Error ? e.message : String(e)}`)
         setScreen("setup")
+        startingRef.current = false
       }
       bump((n) => n + 1)
     },
@@ -94,7 +98,9 @@ export function App(props: { onQuit: () => void }) {
       }}
       onRestart={() => void applyConfig(config)}
       onStop={() => {
-        void runnerRef.current?.stop()
+        void runnerRef.current?.stop().then(() => {
+          startingRef.current = false
+        })
         runnerRef.current = null
         setLog([])
         setScreen("setup")

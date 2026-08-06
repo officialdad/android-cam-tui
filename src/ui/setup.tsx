@@ -25,7 +25,13 @@ export function Setup(props: { onStart: (c: StreamConfig) => void }) {
         setSinks(sk)
         const validCam = cams.find((c) => c.id === cfg.cameraId) ?? cams[0]
         const sink = sk.find((s) => s.path === cfg.sink)?.path ?? sk[0]?.path ?? cfg.sink
-        setConfig({ ...cfg, cameraId: validCam.id, sink })
+        const size = validCam.sizes.includes(cfg.size) ? cfg.size : validCam.sizes[0]
+        const fps = validCam.fps.includes(cfg.fps) ? cfg.fps : validCam.fps[validCam.fps.length - 1]
+        const zoom =
+          cfg.zoom !== null && validCam.zoomRange && cfg.zoom >= validCam.zoomRange[0] && cfg.zoom <= validCam.zoomRange[1]
+            ? cfg.zoom
+            : null
+        setConfig({ ...cfg, cameraId: validCam.id, sink, size, fps, zoom })
       })
       .catch((e) => setError(`Probe failed: ${e.message} — is scrcpy installed?`))
   }, [])
@@ -105,7 +111,10 @@ export function Setup(props: { onStart: (c: StreamConfig) => void }) {
         <input
           focused={field === "zoom"}
           placeholder={cam.zoomRange ? `${cam.zoomRange[0]}–${cam.zoomRange[1]}, e.g. 0.6` : "n/a"}
-          onInput={(v: string) => setConfig({ ...config, zoom: v.trim() === "" ? null : Number(v) })}
+          onInput={(v: string) => {
+            const n = Number(v)
+            setConfig({ ...config, zoom: v.trim() === "" || !Number.isFinite(n) ? null : n })
+          }}
         />
       </box>
       <box title={`bitrate${field === "bitrate" ? " *" : ""}`} style={{ border: true, height: 3 }}>

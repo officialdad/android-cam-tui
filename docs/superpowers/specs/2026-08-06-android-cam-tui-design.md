@@ -27,7 +27,7 @@ choose; the dashboard model was picked explicitly.
     at 0.6 (ultrawide) / 1 (main) / 3 (tele).
   - Resolution — from `scrcpy --list-camera-sizes` for the selected camera.
   - FPS — from the camera's advertised fps set.
-  - Bitrate — free entry, default 24M.
+  - Bitrate — free entry, default 16M (raise for 2K+).
   - Sink device — detected v4l2loopback devices, default the one labeled
     "Phone Cam".
 - Command preview line: the exact scrcpy invocation the current form builds.
