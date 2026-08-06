@@ -1,5 +1,6 @@
-import { useCallback, useRef, useState } from "react"
-import { saveConfig, type StreamConfig } from "./config"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { loadConfig, saveConfig, type StreamConfig } from "./config"
+import { openPreview } from "./preview"
 import { probeCameras, type CameraInfo } from "./scrcpy/probe"
 import { StreamRunner, type StreamEvent } from "./scrcpy/runner"
 import { Dashboard, eventToLog, type LogLine } from "./ui/dashboard"
@@ -7,8 +8,10 @@ import { Setup } from "./ui/setup"
 
 const ZOOM_PRESETS = [null, 0.6, 1, 3] as const
 
-export function App(props: { onQuit: () => void }) {
-  const [screen, setScreen] = useState<"setup" | "dashboard">("setup")
+export function App(props: { onQuit: () => void; autoStart?: boolean }) {
+  const [screen, setScreen] = useState<"setup" | "dashboard" | "starting">(
+    props.autoStart ? "starting" : "setup",
+  )
   const [config, setConfig] = useState<StreamConfig | null>(null)
   const [log, setLog] = useState<LogLine[]>([])
   const [, bump] = useState(0) // re-render on runner state changes
@@ -51,6 +54,12 @@ export function App(props: { onQuit: () => void }) {
     [pushEvent, pushLog],
   )
 
+  // `--start` skips the setup screen with the last-used config. A config the phone can
+  // no longer satisfy just fails the probe, and start() already falls back to setup.
+  useEffect(() => {
+    if (props.autoStart) void loadConfig().then(start)
+  }, [props.autoStart, start])
+
   const applyConfig = useCallback(
     async (next: StreamConfig) => {
       setConfig(next)
@@ -65,6 +74,7 @@ export function App(props: { onQuit: () => void }) {
     [pushLog],
   )
 
+  if (screen === "starting") return <text>starting from saved config…</text>
   if (screen === "setup" || !config) return <Setup onStart={start} />
 
   const runner = runnerRef.current
@@ -96,6 +106,8 @@ export function App(props: { onQuit: () => void }) {
           zoom: null,
         })
       }}
+      onTorchToggle={() => void applyConfig({ ...config, torch: !config.torch })}
+      onPreview={() => openPreview(config.sink)}
       onRestart={() => void applyConfig(config)}
       onStop={() => {
         void runnerRef.current?.stop().then(() => {

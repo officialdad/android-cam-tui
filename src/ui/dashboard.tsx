@@ -17,9 +17,11 @@ export function eventToLog(e: StreamEvent): string {
     case "device-lost":
       return "device disconnected"
     case "exited":
-      return `scrcpy exited (code ${e.code})`
+      return `scrcpy exited (code ${e.code})${e.reason ? ` — ${e.reason}` : ""}`
     case "restarting":
       return `restarting (attempt ${e.attempt})…`
+    case "gave-up":
+      return `gave up after ${e.attempts} attempts — fix the cause above, then r to retry`
   }
 }
 
@@ -30,11 +32,14 @@ export function Dashboard(props: {
   log: LogLine[]
   onZoomCycle: () => void
   onCameraCycle: () => void
+  onTorchToggle: () => void
+  onPreview: () => string
   onRestart: () => void
   onStop: () => void
   onQuit: () => void
 }) {
   const [now, setNow] = useState(Date.now())
+  const [notice, setNotice] = useState<string | null>(null)
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
@@ -43,6 +48,8 @@ export function Dashboard(props: {
   useKeyboard((key) => {
     if (key.name === "z") props.onZoomCycle()
     if (key.name === "l") props.onCameraCycle()
+    if (key.name === "t") props.onTorchToggle()
+    if (key.name === "p") setNotice(props.onPreview())
     if (key.name === "r") props.onRestart()
     if (key.name === "s") props.onStop()
     if (key.name === "q") props.onQuit()
@@ -58,6 +65,7 @@ export function Dashboard(props: {
     ["fps", props.config.highSpeed ? `${props.config.fps} hs` : String(props.config.fps)],
     ["bitrate", props.config.bitrate],
     ["zoom", props.config.zoom === null ? "auto" : `${props.config.zoom}x`],
+    ["torch", props.config.torch ? "on" : "off"],
     ["sink", props.config.sink],
   ]
 
@@ -85,7 +93,8 @@ export function Dashboard(props: {
           ))}
         </scrollbox>
       </box>
-      <text fg="cyan">z: zoom · l: camera · r: restart · s: stop → setup · q: quit</text>
+      {notice && <text fg="#888">{notice}</text>}
+      <text fg="cyan">z: zoom · l: camera · t: torch · p: preview · r: restart · s: stop → setup · q: quit</text>
     </box>
   )
 }

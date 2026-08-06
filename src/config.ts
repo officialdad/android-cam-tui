@@ -8,6 +8,8 @@ export interface StreamConfig {
   highSpeed: boolean
   bitrate: string
   zoom: number | null
+  /** Camera flash held on as a fill light — set at capture start, so toggling restarts. */
+  torch: boolean
   sink: string
   serial: string | null
   orientation: (typeof ORIENTATIONS)[number]
@@ -21,6 +23,7 @@ export const DEFAULT_CONFIG: StreamConfig = {
   highSpeed: false,
   bitrate: "16M",
   zoom: null,
+  torch: false,
   sink: "/dev/video3",
   serial: null,
   orientation: "0",
@@ -43,6 +46,7 @@ export function buildArgs(c: StreamConfig): string[] {
   ]
   if (c.highSpeed) args.push("--camera-high-speed")
   if (c.zoom !== null) args.push(`--camera-zoom=${c.zoom}`)
+  if (c.torch) args.push("--camera-torch")
   if (c.serial !== null) args.push("-s", c.serial)
   if (c.orientation !== "0") args.push(`--capture-orientation=${c.orientation}`)
   if (c.v4l2Buffer > 0) args.push(`--v4l2-buffer=${c.v4l2Buffer}`)
