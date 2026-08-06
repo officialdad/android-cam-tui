@@ -2,6 +2,7 @@
 // without a phone attached. `bun run demo`
 import { createCliRenderer } from "@opentui/core"
 import { createRoot } from "@opentui/react"
+import type { Env } from "../doctor"
 import type { DeviceInfo } from "../scrcpy/devices"
 import type { CameraInfo, SinkInfo } from "../scrcpy/probe"
 import { Setup } from "./setup"
@@ -28,7 +29,19 @@ const DEVICES: DeviceInfo[] = [
 const renderer = await createCliRenderer()
 createRoot(renderer).render(
   <Setup
-    probes={{ cameras: async () => CAMERAS, sinks: async () => SINKS, devices: async () => DEVICES }}
+    probes={{
+      cameras: async () => CAMERAS,
+      env: async (): Promise<Env> => ({
+        scrcpy: "/usr/bin/scrcpy",
+        adb: "/usr/bin/adb",
+        v4l2ctl: "/usr/bin/v4l2-ctl",
+        player: "/usr/bin/mpv",
+        scrcpyVersion: [4, 1],
+        sinks: SINKS,
+        devices: DEVICES,
+        distro: "arch",
+      }),
+    }}
     onStart={() => {
       renderer.destroy()
       process.exit(0)
