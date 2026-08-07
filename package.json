@@ -1,6 +1,6 @@
 {
   "name": "android-cam-tui",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Terminal UI for using an Android phone as a Linux webcam, via scrcpy and v4l2loopback",
   "license": "MIT",
   "author": "opariffazman",
