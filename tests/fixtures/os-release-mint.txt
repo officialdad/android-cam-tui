@@ -1,0 +1,4 @@
+NAME="Linux Mint"
+VERSION="21.3 (Virginia)"
+ID=linuxmint
+ID_LIKE=ubuntu

@@ -12,9 +12,10 @@ bun run typecheck              # tsc --noEmit
 bun test                       # all tests
 bun test tests/runner.test.ts  # one file
 bun test -t "auto-restarts"    # one test by name substring
+bun run src/index.tsx --doctor   # dependency report, no TUI
 ```
 
-Runtime deps outside the repo: `scrcpy` ≥ 4.0, `adb`, `v4l2-ctl` on PATH, and a
+Runtime deps outside the repo: `scrcpy` ≥ 3.0, `adb`, `v4l2-ctl` on PATH, and a
 v4l2loopback sink (`sudo modprobe v4l2loopback exclusive_caps=1 card_label="Phone Cam"`).
 The phone must be unlocked — Android evicts adb camera clients when the keyguard engages.
 
@@ -40,11 +41,32 @@ its **spawn wrapper**, and that split is the entire testing seam:
 | `parseCameras`, `parseSinks` | `probeCameras`, `probeSinks` | `src/scrcpy/probe.ts` |
 | `parseDevices` | `listDevices`, `goWireless`, `goUsb` | `src/scrcpy/devices.ts` |
 | `buildArgs` | — | `src/config.ts` |
+| `checks`, `detectDistro`, `parseScrcpyVersion` | `probeEnv` | `src/doctor.ts` |
 
 Parsers are tested against text fixtures in `tests/fixtures/`. `StreamRunner` takes
 `scrcpyPath`/`adbPath` options so tests inject shell-script fakes (`fake-scrcpy.sh`,
 `slow-adb.sh`, or one written to a tmpdir). Keep new shell-outs to this shape: parse
 function first, spawn wrapper around it.
+
+`src/doctor.ts` is the preflight. `probeEnv()` gathers binaries (`Bun.which`),
+the scrcpy version, sinks, devices and `/etc/os-release` without ever rejecting;
+`checks()` turns that into `block`/`warn` entries carrying the install commands
+for the detected distro. `Setup` renders `<Doctor>` instead of the setup screen
+when a `block` check fails. The doctor never runs a privileged command — new
+checks print a command, they do not execute one.
+
+`checkList` in `src/ui/setup.tsx` is the only source of user-facing dependency
+truth. A failure `checks()` cannot see (no cameras, a thrown preflight) is pushed
+onto it as a synthetic `block` entry so it renders through `<Doctor>` and inherits
+the warnings and the `r` key. Do not add a second error box. Fix lines must fit
+**76 columns** — the doctor indents them by two inside a bordered, padded box, so
+anything longer wraps at 80 and the user pastes a broken command.
+
+`Bun.spawn` throws **synchronously** when the executable is missing, so a new
+spawn wrapper wants its try around the spawn itself, not just around the await —
+that is what `probe.ts` and `devices.ts` do. `runner.ts` and `preview.ts` still
+spawn bare; both are only reachable once something else has proved the binary is
+there (a `block` check, `Bun.which`), so keep that guarantee if you move them.
 
 `adb`'s `-s <serial>` must precede the subcommand (`adb -s X shell ...`), and every
 scrcpy/adb call is serial-scoped so a USB and a wireless device can be attached at once.

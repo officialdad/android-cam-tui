@@ -1,0 +1,18 @@
+post_install() {
+  cat <<'EOF'
+android-cam-tui needs a v4l2loopback sink. To load one now and keep it after a reboot:
+
+  sudo modprobe v4l2loopback exclusive_caps=1 card_label="Phone Cam"
+  echo v4l2loopback | sudo tee /etc/modules-load.d/v4l2loopback.conf
+  echo 'options v4l2loopback exclusive_caps=1 card_label="Phone Cam"' \
+    | sudo tee /etc/modprobe.d/v4l2loopback.conf
+
+For adb access without root: sudo pacman -S android-udev && sudo usermod -aG adbusers $USER
+
+Run `android-cam-tui --doctor` to check everything.
+EOF
+}
+
+post_upgrade() {
+  post_install
+}

@@ -16,24 +16,40 @@ face unlock, camera app opened).
 
 ## Requirements
 
-- Linux with `v4l2loopback` (`sudo modprobe v4l2loopback exclusive_caps=1 card_label="Phone Cam"`)
-- `scrcpy` ≥ 4.0, `adb`, `v4l2-ctl` on PATH
+`android-cam-tui --doctor` checks all of these and prints the install command
+for your distro:
+
+- Linux with `v4l2loopback` loaded
+- `scrcpy` ≥ 3.0, `adb`, `v4l2-ctl` on PATH
 - Phone: USB debugging enabled, plugged in, **unlocked** (Android kills
   camera access for adb clients when the keyguard engages)
 
+When something on that list is missing the setup screen shows the same report
+instead of starting; fix it in another terminal and press `r` to re-check.
+Problems that only degrade things — an old scrcpy, no preview player — are one
+yellow line on the setup screen and do not stop you.
+
 ## Install
 
-Standalone binaries are on the
-[latest release](https://github.com/officialdad/android-cam-tui/releases/latest) —
-`linux-x64` and `linux-arm64`, no Bun needed at runtime:
-
 ```bash
-curl -fsSL https://github.com/officialdad/android-cam-tui/releases/latest/download/android-cam-tui-linux-x64.tar.gz | tar -xz
-./android-cam-tui
+curl -fsSL https://raw.githubusercontent.com/officialdad/android-cam-tui/main/install.sh | sh
 ```
 
-Each archive ships a `.sha256` next to it. From source instead (needs
-[Bun](https://bun.sh) ≥ 1.3):
+Downloads the latest release for your architecture, verifies its checksum,
+installs it to `~/.local/bin` (override with `PREFIX=`), adds that directory to
+your shell's `PATH` if it is missing, and finishes by reporting any runtime
+dependency you still need.
+
+Arch and derivatives can use the AUR package instead:
+
+```bash
+paru -S android-cam-tui-bin
+```
+
+Or take the tarball by hand from the
+[latest release](https://github.com/officialdad/android-cam-tui/releases/latest) —
+`linux-x64` and `linux-arm64`, each with a `.sha256` beside it, no Bun needed at
+runtime. From source instead (needs [Bun](https://bun.sh) ≥ 1.3):
 
 ```bash
 git clone https://github.com/officialdad/android-cam-tui
@@ -46,8 +62,8 @@ bun start
 ## Run
 
 ```bash
-./android-cam-tui            # setup screen
-./android-cam-tui --start    # skip setup, stream the last-used config
+android-cam-tui            # setup screen
+android-cam-tui --start    # skip setup, stream the last-used config
 ```
 
 From source, `bun start` and `bun start --start`.
