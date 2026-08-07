@@ -118,7 +118,7 @@ describe("Setup → Doctor", () => {
       expect(frame).toContain(c.detail)
       for (const line of c.fix) expect(frame).toContain(line)
     }
-    expect(frame).toContain("r to re-check")
+    expect(frame).toContain("r re-check")
   })
 
   // The regression test for the 80x24 overdraw: the doctor needs ~29 rows for a bare
@@ -134,7 +134,7 @@ describe("Setup → Doctor", () => {
     }
     const lines = bodyLines(frame)
     const footer = lines.at(-1)!
-    expect(footer).toContain("r to re-check")
+    expect(footer).toContain("r re-check")
 
     expect(lines.slice(0, -1).filter((l) => !expected.has(l))).toEqual([])
     // …and it actually drew something, so an empty body cannot pass the check above.
@@ -167,7 +167,7 @@ describe("Setup → Doctor", () => {
 
     expect(frame).toContain("no cameras on R5CT")
     expect(frame).toContain("scrcpy 2.1 is too old")
-    expect(frame).toContain("r to re-check")
+    expect(frame).toContain("r re-check")
   })
 
   // Regression for the `refreshEnv()` change in `toggleTransport`: it sets `checkList`

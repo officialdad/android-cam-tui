@@ -40,8 +40,11 @@ export function Doctor(props: { checks: Check[]; onRecheck: () => void; busy?: b
           </box>
         ))}
       </scrollbox>
+      {/* The renderer holds mouse tracking, so the terminal's own selection is intercepted
+          and none of the above can be dragged out — which defeats a screen whose whole job
+          is handing over commands. `--doctor` prints the same list to stdout. */}
       <text fg="cyan">
-        {props.busy ? "re-checking…" : "↑↓ scroll · fix the above, then r to re-check · ctrl-c quit"}
+        {props.busy ? "re-checking…" : "↑↓ scroll · r re-check · ctrl-c quit · --doctor prints this copyably"}
       </text>
     </box>
   )
