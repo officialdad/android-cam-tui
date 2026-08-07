@@ -13,7 +13,7 @@ export function eventToLog(e: StreamEvent): string {
     case "started":
       return "stream started"
     case "camera-evicted":
-      return "camera evicted (phone locked or camera in use — unlock phone)"
+      return "camera evicted (another app took it — face unlock or a camera app)"
     case "device-lost":
       return "device disconnected"
     case "exited":

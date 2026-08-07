@@ -164,7 +164,7 @@ export function Setup(props: {
         setCheckList([
           ...list,
           blocker("cameras", `no cameras on ${pick?.serial ?? "this phone"} — scrcpy reported none`, [
-            "unlock the phone — Android hides the cameras behind the keyguard",
+            "# another app may hold the camera — close it, or reboot the phone",
             `scrcpy${serial ? ` -s ${serial}` : ""} --list-cameras`,
           ]),
         ])

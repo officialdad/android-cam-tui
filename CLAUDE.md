@@ -17,7 +17,11 @@ bun run src/index.tsx --doctor   # dependency report, no TUI
 
 Runtime deps outside the repo: `scrcpy` ≥ 3.0, `adb`, `v4l2-ctl` on PATH, and a
 v4l2loopback sink (`sudo modprobe v4l2loopback exclusive_caps=1 card_label="Phone Cam"`).
-The phone must be unlocked — Android evicts adb camera clients when the keyguard engages.
+The phone does **not** need unlocking: `--list-cameras` and camera capture both work
+through the keyguard with the screen off. Never wake or unlock it from code — waking a
+locked phone starts face unlock, which opens a camera of its own and pushes the device
+over the system-wide open-camera limit, so scrcpy's own open is rejected. That is what
+`StreamRunner.prepPhone()` used to do, and it turned every restart into a restart loop.
 
 ## Architecture
 
@@ -43,9 +47,9 @@ its **spawn wrapper**, and that split is the entire testing seam:
 | `buildArgs` | — | `src/config.ts` |
 | `checks`, `detectDistro`, `parseScrcpyVersion` | `probeEnv` | `src/doctor.ts` |
 
-Parsers are tested against text fixtures in `tests/fixtures/`. `StreamRunner` takes
-`scrcpyPath`/`adbPath` options so tests inject shell-script fakes (`fake-scrcpy.sh`,
-`slow-adb.sh`, or one written to a tmpdir). Keep new shell-outs to this shape: parse
+Parsers are tested against text fixtures in `tests/fixtures/`. `StreamRunner` takes a
+`scrcpyPath` option so tests inject shell-script fakes (`fake-scrcpy.sh`, or one
+written to a tmpdir). Keep new shell-outs to this shape: parse
 function first, spawn wrapper around it.
 
 `src/doctor.ts` is the preflight. `probeEnv()` gathers binaries (`Bun.which`),
@@ -81,7 +85,7 @@ scrcpy/adb call is serial-scoped so a USB and a wireless device can be attached 
 ### StreamRunner epochs
 
 `src/scrcpy/runner.ts` supervises the stream and auto-restarts when Android kills the
-camera. It has multiple `await` points (`prepPhone`, restart delay) during which
+camera. It `await`s the restart backoff, during which
 `stop()` or a newer `start()` may land. A monotonic `epoch` counter is the abort
 mechanism: capture `myEpoch` before an await, **re-check after every one**, bail if it
 moved. `stop()` bumps the epoch. Adding an await inside `start`/`onExit` without an

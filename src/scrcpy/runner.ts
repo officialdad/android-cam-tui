@@ -12,7 +12,6 @@ export type RunnerState = "idle" | "running" | "restarting" | "stopped"
 
 interface RunnerOpts {
   scrcpyPath?: string
-  adbPath?: string
   restartDelayMs?: number
   maxAttempts?: number
   onEvent: (e: StreamEvent) => void
@@ -44,14 +43,12 @@ export class StreamRunner {
   private lastLine: string | null = null
   private lastError: string | null = null
   private readonly scrcpyPath: string
-  private readonly adbPath: string
   private readonly restartDelayMs: number
   private readonly maxAttempts: number
   private readonly onEvent: (e: StreamEvent) => void
 
   constructor(opts: RunnerOpts) {
     this.scrcpyPath = opts.scrcpyPath ?? "scrcpy"
-    this.adbPath = opts.adbPath ?? "adb"
     this.restartDelayMs = opts.restartDelayMs ?? 2000
     this.maxAttempts = opts.maxAttempts ?? 6
     this.onEvent = opts.onEvent
@@ -64,13 +61,18 @@ export class StreamRunner {
     this.proc?.kill()
   }
 
+  /**
+   * Never wakes or unlocks the phone. Camera capture works with the screen off and the
+   * keyguard up; waking a locked phone starts face unlock, which opens a camera of its
+   * own and pushes the device over the system-wide open-camera limit — scrcpy's own open
+   * is then rejected ("The system-wide limit for number of open cameras has been
+   * reached"). Face unlock holds it for a few seconds, so every restart that woke the
+   * phone first re-armed the thing that made it fail: an endless restart loop.
+   */
   async start(config: StreamConfig): Promise<void> {
     this.config = config
     this.attempt = 0
-    const myEpoch = ++this.epoch
-    this.state = "idle"
-    await this.prepPhone()
-    if (this.epoch !== myEpoch) return // stop() or newer start() superseded us
+    this.epoch++ // supersede any restart still waiting out its backoff
     this.spawn()
   }
 
@@ -87,22 +89,6 @@ export class StreamRunner {
       this.proc.kill()
       await this.proc.exited
       this.proc = null
-    }
-  }
-
-  private async prepPhone(): Promise<void> {
-    // Samsung evicts adb camera clients the moment the keyguard engages.
-    const sel = this.config.serial ? ["-s", this.config.serial] : [] // must precede `shell`
-    for (const args of [
-      ["shell", "input", "keyevent", "KEYCODE_WAKEUP"],
-      ["shell", "wm", "dismiss-keyguard"],
-    ]) {
-      try {
-        await Bun.spawn([this.adbPath, ...sel, ...args], { stdout: "ignore", stderr: "ignore" })
-          .exited
-      } catch {
-        // phone prep is best-effort
-      }
     }
   }
 
@@ -160,8 +146,6 @@ export class StreamRunner {
     // Backoff: a config scrcpy rejects instantly would otherwise respawn twice a second forever.
     await new Promise((r) => setTimeout(r, Math.min(30_000, this.restartDelayMs * 2 ** (this.attempt - 1))))
     if (this.epoch !== myEpoch) return // stop() called, abort restart
-    await this.prepPhone()
-    if (this.epoch !== myEpoch) return // stop() called during prepPhone()
     this.spawn()
   }
 }

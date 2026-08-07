@@ -9,8 +9,8 @@ Terminal UI for using an Android phone as a Linux webcam via
 
 Probes your phone's real cameras (lenses, resolutions, fps, zoom ranges),
 streams the one you pick into a virtual webcam device, and supervises the
-stream — auto-restarting when Android evicts the camera (phone locked,
-face unlock, camera app opened).
+stream — auto-restarting when Android evicts the camera (face unlock, camera
+app opened, phone rebooted).
 
 ![setup screen](docs/demo.gif)
 
@@ -21,8 +21,9 @@ for your distro:
 
 - Linux with `v4l2loopback` loaded
 - `scrcpy` ≥ 3.0, `adb`, `v4l2-ctl` on PATH
-- Phone: USB debugging enabled, plugged in, **unlocked** (Android kills
-  camera access for adb clients when the keyguard engages)
+- Phone: USB debugging enabled, plugged in, and **authorized** for this
+  computer. The screen may be off and locked — camera capture works through
+  the keyguard, and waking a locked phone hands the camera to face unlock
 
 When something on that list is missing the setup screen shows the same report
 instead of starting. `c` puts every command on the clipboard as a shell script —
