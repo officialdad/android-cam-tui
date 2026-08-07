@@ -1,6 +1,6 @@
 # Maintainer: opariffazman <opariffazman@gmail.com>
 pkgname=android-cam-tui-bin
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Terminal UI for using an Android phone as a Linux webcam, via scrcpy and v4l2loopback"
 arch=('x86_64' 'aarch64')
@@ -13,13 +13,17 @@ optdepends=('ffmpeg: preview window'
             'android-udev: adb access without root')
 provides=("android-cam-tui=$pkgver")
 conflicts=('android-cam-tui')
+# `bun build --compile` appends the bundled script past the ELF's last section and
+# finds it through a trailer. makepkg's default strip discards that, leaving a binary
+# that falls through to Bun's own CLI and prints its usage for every flag.
+options=('!strip' '!debug')
 install="$pkgname.install"
 source=("LICENSE-$pkgver::$url/raw/v$pkgver/LICENSE")
 source_x86_64=("$pkgname-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/android-cam-tui-linux-x64.tar.gz")
 source_aarch64=("$pkgname-$pkgver-aarch64.tar.gz::$url/releases/download/v$pkgver/android-cam-tui-linux-arm64.tar.gz")
 sha256sums=('e63d105c68bd498494a00fea7fad35ee03f1797fe35467171672f7270dce963d')
-sha256sums_x86_64=('fbc696426af5d13314096cfcfc3a0c270dfc32e455b9587eb99128699dc7e656')
-sha256sums_aarch64=('40da67cb2cd86a52a4bbefd7ba1297c4603bbe314bd07017ec475a96d05a5ab7')
+sha256sums_x86_64=('a269429240c9093c315c8cc8ce696b72f4e17c236b559f1acec60b175b3093c3')
+sha256sums_aarch64=('a1974386e483a810e41edf6fe71ebe7f080b25a745ac0366b6da885ac84fa388')
 
 package() {
   install -Dm755 "$srcdir/android-cam-tui" "$pkgdir/usr/bin/android-cam-tui"
