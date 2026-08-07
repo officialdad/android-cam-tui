@@ -204,4 +204,35 @@ describe("Setup → Doctor", () => {
       mock.restore()
     }
   })
+
+  // The screen exists to hand over commands, and mouse tracking means they cannot be
+  // selected out of it — so `c` is the only way they leave. `copyToClipboard` is the spawn
+  // wrapper around wl-copy/xclip, faked at the module boundary the way the `w` test fakes
+  // adb; what is under test is that the key reaches it with the right text.
+  test("c copies the failing checks as a shell script and says so", async () => {
+    let copied = ""
+    await mock.module("../src/clipboard", () => ({
+      copyToClipboard: (text: string) => {
+        copied = text
+        return "copied with wl-copy — paste it into a shell after quitting"
+      },
+    }))
+    try {
+      const t = await render(() => BARE, CAMERAS, 80, 44)
+      expect(t.captureCharFrame()).toContain("missing dependencies")
+
+      await act(async () => {
+        t.mockInput.pressKey("c")
+      })
+      const frame = await pollFrame(t, (f) => f.includes("copied with wl-copy"))
+
+      expect(copied).toContain("# scrcpy is not on PATH")
+      expect(copied).toContain("sudo apt install scrcpy")
+      // Prose carries its own `#`, which is what makes the whole block pasteable.
+      expect(copied).toContain("# plug the phone in over USB")
+      expect(frame).toContain("copied with wl-copy")
+    } finally {
+      mock.restore()
+    }
+  })
 })

@@ -1,6 +1,7 @@
-import { useRef } from "react"
+import { useRef, useState } from "react"
 import { useKeyboard } from "@opentui/react"
-import type { Check } from "../doctor"
+import { copyToClipboard } from "../clipboard"
+import { fixScript, type Check } from "../doctor"
 
 /**
  * Presentational: it renders whatever failed and offers a re-check. All probing
@@ -12,12 +13,17 @@ export function Doctor(props: { checks: Check[]; onRecheck: () => void; busy?: b
   // mirror the prop into a ref and set it on the keystroke itself.
   const busyRef = useRef(false)
   busyRef.current = props.busy ?? false
+  const [copied, setCopied] = useState<string | null>(null)
+  // Read inside the handler closure, which is one render behind — same rule as `busyRef`.
+  const checksRef = useRef(props.checks)
+  checksRef.current = props.checks
 
   useKeyboard((key) => {
     if (key.name === "r" && !busyRef.current) {
       busyRef.current = true
       props.onRecheck()
     }
+    if (key.name === "c") setCopied(copyToClipboard(fixScript(checksRef.current)))
   })
 
   const failed = props.checks.filter((c) => !c.ok)
@@ -42,9 +48,9 @@ export function Doctor(props: { checks: Check[]; onRecheck: () => void; busy?: b
       </scrollbox>
       {/* The renderer holds mouse tracking, so the terminal's own selection is intercepted
           and none of the above can be dragged out — which defeats a screen whose whole job
-          is handing over commands. `--doctor` prints the same list to stdout. */}
-      <text fg="cyan">
-        {props.busy ? "re-checking…" : "↑↓ scroll · r re-check · ctrl-c quit · --doctor prints this copyably"}
+          is handing over commands. `c` puts them on the clipboard instead. */}
+      <text fg={copied ? "green" : "cyan"}>
+        {props.busy ? "re-checking…" : (copied ?? "↑↓ scroll · c copy · r re-check · ctrl-c quit")}
       </text>
     </box>
   )

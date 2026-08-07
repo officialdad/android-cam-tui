@@ -25,9 +25,14 @@ for your distro:
   camera access for adb clients when the keyguard engages)
 
 When something on that list is missing the setup screen shows the same report
-instead of starting; fix it in another terminal and press `r` to re-check.
-Problems that only degrade things — an old scrcpy, no preview player — are one
-yellow line on the setup screen and do not stop you.
+instead of starting. `c` puts every command on the clipboard as a shell script —
+the TUI holds mouse tracking, so they cannot be selected out of it — then fix it
+in another terminal and press `r` to re-check. Problems that only degrade things
+— an old scrcpy, no preview player — are one yellow line on the setup screen and
+do not stop you.
+
+`c` needs `wl-copy` (wayland) or `xclip` (x11); without one, `--doctor` prints
+the same thing to stdout.
 
 ## Install
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { detectDistro, parseScrcpyVersion, checks, type Env } from "../src/doctor"
+import { detectDistro, parseScrcpyVersion, checks, fixScript, type Distro, type Env } from "../src/doctor"
 import type { DeviceInfo } from "../src/scrcpy/devices"
 
 const fixture = (name: string) => Bun.file(`${import.meta.dir}/fixtures/${name}`).text()
@@ -162,5 +162,53 @@ describe("checks", () => {
     const fix = find({ ...OK, scrcpy: null, scrcpyVersion: null, distro: "fedora" }, "scrcpy").fix
     expect(fix[0]).toContain("rpmfusion")
     expect(fix[1]).toBe("sudo dnf install scrcpy")
+  })
+})
+
+/**
+ * The doctor screen's `c` key copies `fixScript` straight to the clipboard so the user can
+ * paste it into a shell. That only works while every fix line is shell-valid: prose has to
+ * carry its own `#`. A line added without one runs as a command and fails on paste — this
+ * catches it at the source rather than on someone's machine.
+ */
+describe("fixScript", () => {
+  const DISTROS: Distro[] = ["arch", "debian", "fedora", "suse", "unknown"]
+  // Everything broken at once, so every check contributes its fix lines.
+  const BROKEN: Env = {
+    ...OK,
+    scrcpy: null,
+    adb: null,
+    v4l2ctl: null,
+    player: null,
+    scrcpyVersion: [2, 1],
+    sinks: [],
+    devices: [{ serial: "R5CT", model: "", wireless: false, state: "no" }],
+  }
+  // A command, or the `|` continuation of the modprobe heredoc. Anything else is prose.
+  const RUNNABLE = /^(sudo|adb|echo)\b|^\s+\|/
+
+  test("every fix line across every distro is a comment or a runnable command", () => {
+    for (const distro of DISTROS) {
+      for (const state of ["no", "unauthorized", "offline"]) {
+        const env = { ...BROKEN, distro, devices: [{ serial: "R5CT", model: "", wireless: false, state }] }
+        for (const check of checks(env)) {
+          for (const line of check.fix) {
+            expect({ distro, state, line, ok: line.startsWith("#") || RUNNABLE.test(line) }).toMatchObject({ ok: true })
+          }
+        }
+      }
+    }
+  })
+
+  test("details become comments and passing checks are left out", () => {
+    const script = fixScript(checks({ ...BROKEN, distro: "debian" }))
+    expect(script).toContain("# scrcpy is not on PATH")
+    expect(script).toContain("sudo apt install scrcpy")
+    // BROKEN has a device attached, so the `device` check passes and contributes nothing.
+    expect(script).not.toContain("no phone detected")
+  })
+
+  test("an environment with nothing wrong yields an empty script", () => {
+    expect(fixScript(checks(OK))).toBe("")
   })
 })

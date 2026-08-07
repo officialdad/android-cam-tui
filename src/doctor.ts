@@ -101,11 +101,11 @@ const PKGS: Record<Distro, Pkgs> = {
     udev: ["sudo zypper install android-tools"],
   },
   unknown: {
-    scrcpy: ["https://github.com/Genymobile/scrcpy/blob/master/doc/linux.md"],
-    adb: ["https://developer.android.com/tools/releases/platform-tools"],
-    v4l2ctl: ["install v4l-utils with your package manager"],
-    module: ["https://github.com/v4l2loopback/v4l2loopback#install"],
-    udev: ["https://github.com/M0Rf30/android-udev-rules"],
+    scrcpy: ["# https://github.com/Genymobile/scrcpy/blob/master/doc/linux.md"],
+    adb: ["# https://developer.android.com/tools/releases/platform-tools"],
+    v4l2ctl: ["# install v4l-utils with your package manager"],
+    module: ["# https://github.com/v4l2loopback/v4l2loopback#install"],
+    udev: ["# https://github.com/M0Rf30/android-udev-rules"],
   },
 }
 
@@ -174,9 +174,9 @@ export function checks(env: Env): Check[] {
       ok: env.devices.length > 0,
       detail: "no phone detected",
       fix: [
-        "plug the phone in over USB",
-        "Settings → About phone → tap Build number 7 times",
-        "Settings → Developer options → USB debugging",
+        "# plug the phone in over USB",
+        "# Settings → About phone → tap Build number 7 times",
+        "# Settings → Developer options → USB debugging",
       ],
     },
     {
@@ -185,7 +185,7 @@ export function checks(env: Env): Check[] {
       ok: usable || !unauthorized,
       detail: "phone is unauthorized — it has not accepted this computer",
       fix: [
-        "unlock the phone and tap Allow on the USB debugging prompt",
+        "# unlock the phone and tap Allow on the USB debugging prompt",
         "adb kill-server && adb devices",
       ],
     },
@@ -195,9 +195,9 @@ export function checks(env: Env): Check[] {
       ok: usable || !offline,
       detail: 'phone reports state "offline" — adbd is not answering',
       fix: [
-        "unlock the phone and leave the screen on",
+        "# unlock the phone and leave the screen on",
         "adb kill-server && adb devices",
-        "if it stays offline, unplug and replug the cable",
+        "# if it stays offline, unplug and replug the cable",
       ],
     },
     {
@@ -205,7 +205,12 @@ export function checks(env: Env): Check[] {
       level: "block",
       ok: usable || !broken,
       detail: `phone reports state "${broken?.state ?? ""}" — udev rules are probably missing`,
-      fix: [...pkg.udev, "sudo udevadm control --reload-rules", "unplug and replug the phone, then: adb kill-server"],
+      fix: [
+        ...pkg.udev,
+        "sudo udevadm control --reload-rules",
+        "# unplug and replug the phone, then:",
+        "adb kill-server",
+      ],
     },
     {
       id: "scrcpy-version",
@@ -213,16 +218,29 @@ export function checks(env: Env): Check[] {
       // A missing scrcpy is already the `scrcpy` block; do not report it twice.
       ok: env.scrcpy === null || version === null || atLeast(version, MIN_SCRCPY),
       detail: `scrcpy ${version?.join(".")} is too old for camera capture — needs ${MIN_SCRCPY.join(".")}+`,
-      fix: ["prebuilt: https://github.com/Genymobile/scrcpy/releases/latest"],
+      fix: ["# prebuilt: https://github.com/Genymobile/scrcpy/releases/latest"],
     },
     {
       id: "player",
       level: "warn",
       ok: env.player !== null,
       detail: "no preview player — `p` on the dashboard will do nothing",
-      fix: ["install one of ffmpeg (ffplay), mpv or vlc"],
+      fix: ["# install one of ffmpeg (ffplay), mpv or vlc"],
     },
   ]
+}
+
+/**
+ * The failing checks as a shell script, for the doctor screen's `c` key. Details become
+ * comments and every `fix` line is already shell-valid — prose in a fix array carries its
+ * own `#`, which is what lets the whole block paste into a terminal and run. A fix line
+ * added without that prefix breaks the paste, so `tests/doctor.test.ts` enforces it.
+ */
+export function fixScript(list: Check[]): string {
+  return list
+    .filter((c) => !c.ok)
+    .map((c) => [`# ${c.detail}`, ...c.fix].join("\n"))
+    .join("\n\n")
 }
 
 const PLAYERS = ["ffplay", "mpv", "vlc"]

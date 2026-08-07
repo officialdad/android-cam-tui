@@ -58,9 +58,16 @@ checks print a command, they do not execute one.
 `checkList` in `src/ui/setup.tsx` is the only source of user-facing dependency
 truth. A failure `checks()` cannot see (no cameras, a thrown preflight) is pushed
 onto it as a synthetic `block` entry so it renders through `<Doctor>` and inherits
-the warnings and the `r` key. Do not add a second error box. Fix lines must fit
-**76 columns** — the doctor indents them by two inside a bordered, padded box, so
-anything longer wraps at 80 and the user pastes a broken command.
+the warnings and the `r` key. Do not add a second error box.
+
+Two rules bind every `fix` line, both because the user pastes it into a shell:
+
+- **76 columns.** The doctor indents fix lines by two inside a bordered, padded
+  box, so anything longer wraps at 80 and the paste is a broken command.
+- **Shell-valid.** `c` copies `fixScript()` — the failing checks, details as
+  comments — to the clipboard, so a prose line must carry its own `#`. Without
+  it the paste tries to run "plug the phone in over USB". `tests/doctor.test.ts`
+  enforces both across every distro.
 
 `Bun.spawn` throws **synchronously** when the executable is missing, so a new
 spawn wrapper wants its try around the spawn itself, not just around the await —
