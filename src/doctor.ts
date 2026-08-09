@@ -59,6 +59,14 @@ export interface Env {
 /** Camera capture predates the 4.x line, so this is a warning floor, not a hard gate. */
 const MIN_SCRCPY: [number, number] = [3, 0]
 
+/**
+ * Android 12. The camera *listing* works further back — `--list-cameras` is a plain camera
+ * manager query — so an Android 10 phone reaches the setup screen looking healthy and only
+ * fails once capture starts, with "Server connection failed" hiding the real reason. This
+ * is a hard gate: no scrcpy flag makes an older phone work.
+ */
+export const MIN_SDK = 31
+
 interface Pkgs {
   scrcpy: string[]
   adb: string[]
@@ -129,7 +137,10 @@ export function checks(env: Env): Check[] {
   const pkg = PKGS[env.distro]
   // The device checks are mutually exclusive: one usable phone satisfies all of them, so a
   // second handset stuck unauthorized never blocks a working session.
-  const usable = env.devices.some((d) => d.state === "device")
+  // An unknown sdk counts as usable: only a phone that answered getprop with a number below
+  // the floor is provably too old, and every other device state has a check of its own.
+  const usable = env.devices.some((d) => d.state === "device" && (d.sdk ?? MIN_SDK) >= MIN_SDK)
+  const tooOld = env.devices.find((d) => d.state === "device" && d.sdk !== undefined && d.sdk < MIN_SDK)
   const unauthorized = env.devices.some((d) => d.state === "unauthorized")
   // `offline` is its own diagnosis: adb sees the phone but adbd is not answering — asleep,
   // mid-boot, or restarting after `adb tcpip`. udev rules fix none of that.
@@ -177,6 +188,8 @@ export function checks(env: Env): Check[] {
         "# plug the phone in over USB",
         "# Settings → About phone → tap Build number 7 times",
         "# Settings → Developer options → USB debugging",
+        "# USB notification → File transfer — MIDI/charging-only modes",
+        "# carry no adb interface, so no prompt ever appears",
       ],
     },
     {
@@ -210,6 +223,17 @@ export function checks(env: Env): Check[] {
         "sudo udevadm control --reload-rules",
         "# unplug and replug the phone, then:",
         "adb kill-server",
+      ],
+    },
+    {
+      id: "device-android",
+      level: "block",
+      ok: usable || !tooOld,
+      detail: `phone runs API ${tooOld?.sdk ?? ""} — camera capture needs Android 12 (API ${MIN_SDK})`,
+      fix: [
+        "# nothing to install: scrcpy cannot mirror a camera before Android 12",
+        "# https://github.com/Genymobile/scrcpy/issues/4213",
+        "# use a newer phone, or an IP-webcam app instead",
       ],
     },
     {

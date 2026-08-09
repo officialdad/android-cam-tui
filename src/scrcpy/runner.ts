@@ -122,7 +122,11 @@ export class StreamRunner {
         // Everything else scrcpy prints is dropped, so a fatal ("Could not open v4l2
         // device", an unsupported size) would otherwise surface as a bare exit code.
         if (line) this.lastLine = line
-        if (/\bERROR\b/.test(line)) this.lastError = line
+        // First ERROR, not last: scrcpy reports the cause on the device side
+        // ("Camera mirroring is not supported before Android 12") and then the
+        // fallout on the client side ("Server connection failed"). Keeping the
+        // last one reports the symptom and buries the reason.
+        if (/\bERROR\b/.test(line)) this.lastError ??= line
       }
     }
   }

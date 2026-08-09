@@ -113,6 +113,26 @@ describe("checks", () => {
     }
   })
 
+  // `--list-cameras` answers on Android 10, so this phone looks healthy right up to the
+  // moment capture starts and dies with "Server connection failed". Block it in the doctor.
+  test("a phone below Android 12 blocks on its own check", () => {
+    const devices: DeviceInfo[] = [{ serial: "e410cff1", model: "CPH1931", wireless: false, state: "device", sdk: 29 }]
+    expect(blocked({ ...OK, devices })).toEqual(["device-android"])
+    expect(find({ ...OK, devices }, "device-android").detail).toContain("29")
+  })
+
+  test("an unknown sdk is not treated as too old", () => {
+    expect(blocked(OK)).toEqual([])
+  })
+
+  test("one modern phone clears the android check for an old sibling", () => {
+    const devices: DeviceInfo[] = [
+      { serial: "OLD", model: "", wireless: false, state: "device", sdk: 29 },
+      { serial: "NEW", model: "", wireless: false, state: "device", sdk: 34 },
+    ]
+    expect(blocked({ ...OK, devices })).toEqual([])
+  })
+
   test("one usable device clears every device check", () => {
     const devices: DeviceInfo[] = [
       { serial: "R5CT", model: "", wireless: false, state: "device" },

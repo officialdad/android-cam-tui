@@ -3,6 +3,8 @@ export interface DeviceInfo {
   model: string
   wireless: boolean
   state: string
+  /** `ro.build.version.sdk`. Undefined when the device is not reachable enough to ask. */
+  sdk?: number
 }
 
 const WIRELESS_RE = /^\d{1,3}(?:\.\d{1,3}){3}:\d+$/
@@ -43,7 +45,20 @@ async function adb(cmd: string[]): Promise<{ out: string; code: number }> {
 export async function listDevices(adbPath = "adb"): Promise<DeviceInfo[]> {
   try {
     const { out } = await adb([adbPath, "devices", "-l"])
-    return parseDevices(out)
+    const devices = parseDevices(out)
+    // `adb devices` cannot report the API level, but camera capture needs 12+, so a phone
+    // that answers gets one extra roundtrip. Anything else stays undefined — an
+    // unauthorized or offline phone has its own check and must not be called too old.
+    await Promise.all(
+      devices
+        .filter((d) => d.state === "device")
+        .map(async (d) => {
+          const { out } = await adb([adbPath, "-s", d.serial, "shell", "getprop", "ro.build.version.sdk"])
+          const sdk = Number(out.trim())
+          if (Number.isInteger(sdk) && sdk > 0) d.sdk = sdk
+        }),
+    )
+    return devices
   } catch {
     return [] // caller renders its own "no adb" message
   }

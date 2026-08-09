@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useKeyboard, useTerminalDimensions } from "@opentui/react"
 import type { SelectOption } from "@opentui/core"
 import { buildArgs, loadConfig, ORIENTATIONS, type StreamConfig } from "../config"
-import { checks, probeEnv, type Check, type Env } from "../doctor"
+import { checks, probeEnv, MIN_SDK, type Check, type Env } from "../doctor"
 import { goUsb, goWireless, type DeviceInfo } from "../scrcpy/devices"
 import { probeCameras, type CameraInfo, type SinkInfo } from "../scrcpy/probe"
 import { Doctor } from "./doctor"
@@ -72,8 +72,17 @@ export function fpsStops(cam: CameraInfo, size: string): FpsStop[] {
 
 export const fpsLabel = (s: FpsStop) => (s.highSpeed ? `${s.fps} hs` : String(s.fps))
 
+// The doctor only blocks when *no* phone is capable, so with a modern handset attached the
+// old one still reaches this picker — the label is the only thing stopping it being chosen.
 export const deviceLabel = (d: DeviceInfo) =>
-  [d.serial, d.model, d.state === "device" ? (d.wireless ? "wifi" : "usb") : d.state].filter(Boolean).join("  ")
+  [
+    d.serial,
+    d.model,
+    d.state === "device" ? (d.wireless ? "wifi" : "usb") : d.state,
+    d.sdk !== undefined && d.sdk < MIN_SDK ? "Android <12" : "",
+  ]
+    .filter(Boolean)
+    .join("  ")
 
 /**
  * Snap a saved config onto what the selected phone actually reports. A config can
