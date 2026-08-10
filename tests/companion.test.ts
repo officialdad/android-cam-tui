@@ -72,12 +72,14 @@ describe("ffmpegArgs", () => {
 
   // Rotation is host-side: raw Annex-B has no rotation metadata to carry a phone-side
   // one, and the numbers are clockwise to match scrcpy's --capture-orientation.
-  test("rotation prepends a transpose, before the aspect crop", () => {
+  test("rotation adds a transpose, after the aspect crop", () => {
     expect(vf(ffmpegArgs(27183, { ...FF, orientation: "90" }))).toBe("transpose=1,format=yuv420p")
     expect(vf(ffmpegArgs(27183, { ...FF, orientation: "270" }))).toBe("transpose=2,format=yuv420p")
     expect(vf(ffmpegArgs(27183, { ...FF, orientation: "flip0" }))).toBe("hflip,format=yuv420p")
+    // Crop first: scrcpy applies --crop before --capture-orientation, and the two
+    // backends must not disagree about what an aspect means under rotation.
     const both = vf(ffmpegArgs(27183, { ...FF, orientation: "90", aspect: "1:1" }))
-    expect(both.indexOf("transpose")).toBeLessThan(both.indexOf("crop"))
+    expect(both.indexOf("crop")).toBeLessThan(both.indexOf("transpose"))
   })
 
   // Expression-based on iw/ih, not the config size: the phone clamps the requested size

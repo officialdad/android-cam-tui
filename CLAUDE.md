@@ -119,7 +119,10 @@ zoomed); fps does not, because `-r` must match the actual stream rate, which is 
 absent extras at their previous values, so "auto" must be an explicit 100. Rotation
 and aspect are the other direction: ffmpeg `-vf` filters in `ffmpegArgs()` (Annex-B
 has no rotation metadata; phone-side rotation would need a GL pass), so they work
-with any APK. Old APK + new host: extras ignored, defaults stream. New APK + old
+with any APK. The scrcpy path crops too (`cropFor()` in `config.ts` → `--crop`),
+with the same crop-before-orientation order on both backends — one menu, one meaning
+per field; only the v4l2 buffer stays scrcpy-only (`fieldsFor()`). Old APK + new
+host: extras ignored, defaults stream. New APK + old
 host: no extras, defaults stream. A rebuilt APK updates `src/android-cam.apk` and the
 sha256 comment in `src/companion.ts`.
 

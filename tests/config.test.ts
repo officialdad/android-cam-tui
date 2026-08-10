@@ -1,7 +1,26 @@
 import { describe, expect, test } from "bun:test"
-import { buildArgs, DEFAULT_CONFIG, loadConfig, saveConfig } from "../src/config"
+import { buildArgs, cropFor, DEFAULT_CONFIG, loadConfig, saveConfig } from "../src/config"
+
+describe("cropFor", () => {
+  test("centers the crop and skips it when there is nothing to cut", () => {
+    expect(cropFor("1920x1080", "1:1")).toBe("1080:1080:420:0")
+    expect(cropFor("1920x1080", "4:3")).toBe("1440:1080:240:0")
+    expect(cropFor("1920x1080", "16:9")).toBeNull() // already 16:9
+    expect(cropFor("1920x1080", "native")).toBeNull()
+  })
+
+  // Encoders reject odd dimensions, and 854x480 to 1:1 puts the x offset at 187.
+  test("rounds sizes and offsets down to even", () => {
+    expect(cropFor("854x480", "1:1")).toBe("480:480:186:0")
+  })
+})
 
 describe("buildArgs", () => {
+  test("crops to the aspect, before the capture orientation", () => {
+    expect(buildArgs({ ...DEFAULT_CONFIG, aspect: "1:1" })).toContain("--crop=1080:1080:420:0")
+    expect(buildArgs(DEFAULT_CONFIG).join(" ")).not.toContain("--crop")
+  })
+
   test("builds full flag set", () => {
     expect(buildArgs(DEFAULT_CONFIG)).toEqual([
       "--video-source=camera",

@@ -1,5 +1,5 @@
 export const ORIENTATIONS = ["0", "90", "180", "270", "flip0", "flip90", "flip180", "flip270"] as const
-/** Companion backend only: ffmpeg crops host-side. scrcpy streams the camera's own aspect. */
+/** Centered crop to a target aspect: scrcpy's --crop on that path, an ffmpeg crop filter on the companion path. */
 export const ASPECTS = ["native", "16:9", "4:3", "1:1"] as const
 
 export interface StreamConfig {
@@ -20,7 +20,7 @@ export interface StreamConfig {
    */
   backend: "scrcpy" | "companion"
   orientation: (typeof ORIENTATIONS)[number]
-  /** Only the companion path honours it (ffmpeg crop); the scrcpy path has no crop stage. */
+  /** Applied before orientation on both backends, matching scrcpy's --crop semantics. */
   aspect: (typeof ASPECTS)[number]
   v4l2Buffer: number
 }
@@ -43,6 +43,23 @@ export const DEFAULT_CONFIG: StreamConfig = {
 
 export const CONFIG_PATH = `${process.env.HOME}/.config/android-cam-tui/config.json`
 
+/**
+ * Centered crop of `size` to a target aspect, as scrcpy's W:H:X:Y — or null when there is
+ * nothing to crop (native, or the size already has that aspect, e.g. 16:9 on 1920x1080).
+ * Everything is rounded down to even: encoders reject odd dimensions, and standard camera
+ * sizes only produce odd *offsets* (854x480 to 1:1 puts x at 187), so offsets get it too.
+ */
+export function cropFor(size: string, aspect: StreamConfig["aspect"]): string | null {
+  if (aspect === "native") return null
+  const [w, h] = size.split("x").map(Number)
+  const [num, den] = aspect.split(":").map(Number)
+  const even = (v: number) => Math.floor(v / 2) * 2
+  const cw = even(Math.min(w, (h * num) / den))
+  const ch = even(Math.min(h, (w * den) / num))
+  if (cw === w && ch === h) return null
+  return `${cw}:${ch}:${even((w - cw) / 2)}:${even((h - ch) / 2)}`
+}
+
 export function buildArgs(c: StreamConfig): string[] {
   const args = [
     "--video-source=camera",
@@ -55,6 +72,8 @@ export function buildArgs(c: StreamConfig): string[] {
     "--stay-awake",
     "--no-audio",
   ]
+  const crop = cropFor(c.size, c.aspect)
+  if (crop) args.push(`--crop=${crop}`)
   if (c.highSpeed) args.push("--camera-high-speed")
   if (c.zoom !== null) args.push(`--camera-zoom=${c.zoom}`)
   if (c.torch) args.push("--camera-torch")

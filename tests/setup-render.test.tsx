@@ -295,24 +295,24 @@ describe("Setup → companion backend", () => {
     expect(frame).toContain("27183")
     expect(frame).not.toContain("scrcpy --video-source=camera")
 
-    // Zoom, bitrate, rotate and aspect all work on this path now (intent extras and ffmpeg
-    // filters), so their steppers render. fps and buffer stay guarded: "fps" appears in the
-    // ceiling sentence, so its stepper is ruled out by its padded label, and "buffer" also
-    // shows up inside the ffmpeg preview's "-fflags nobuffer" flag, likewise.
+    // One menu, both backends: every stepper renders here too (fps with its single 30
+    // stop — showing it is how the ceiling is visible). Only the buffer stays out, a
+    // scrcpy flag ffmpeg has no equivalent for. "buffer" also shows up inside the ffmpeg
+    // preview's "-fflags nobuffer" flag, so its stepper is checked by its padded label.
     expect(frame).toContain("bitrate")
     expect(frame).toContain("rotate")
     expect(frame).toContain("aspect")
     expect(frame).toContain("├") // the zoom stepper's bar track
-    expect(frame).not.toContain("fps     ") // the fps stepper's 8-wide padded label
+    expect(frame).toContain("fps     ") // the fps stepper's 8-wide padded label
     expect(frame).not.toContain("buffer  ‹") // the buffer stepper's padded label + selection
 
     expect(getCameras).not.toHaveBeenCalled()
   })
 
-  // Regression for the `3`-key fix: fieldsFor("companion") has no "fps", so `3` must not
-  // move focus there. At this width the camera panel is only drawn while it is focused, so
-  // a wrongly-accepted jump makes it vanish — asserted on rendered content, not color.
-  test("3 does not move focus onto the fps field the companion path has no widget for", async () => {
+  // The companion path has a real fps stepper now (single stop), so `3` jumps to it like
+  // any other backend. At this width the camera panel is only drawn while it is focused,
+  // so the jump makes it vanish — asserted on rendered content, not color.
+  test("3 moves focus onto the fps field on the companion path too", async () => {
     const { t } = await renderCompanion()
     expect(t.captureCharFrame()).toContain("1 camera")
 
@@ -321,6 +321,6 @@ describe("Setup → companion backend", () => {
     })
     await t.flush()
 
-    expect(t.captureCharFrame()).toContain("1 camera")
+    expect(t.captureCharFrame()).not.toContain("1 camera")
   })
 })

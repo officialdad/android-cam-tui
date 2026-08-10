@@ -17,14 +17,14 @@ type Field = (typeof FIELDS)[number]
 const PANEL_FIELDS: Field[] = ["device", "camera", "size"]
 
 /**
- * Per backend, only steppers that can do something. Companion: no fps (ffmpeg's -r must
- * match the actual stream rate — see COMPANION_CAM) and no v4l2 buffer (that is a scrcpy
- * flag). Aspect is the reverse: an ffmpeg crop, so the scrcpy path has no stage for it.
+ * One menu, both backends — every field means the same thing on either path. The single
+ * exception is the v4l2 buffer, a scrcpy flag ffmpeg has no equivalent for: a stepper
+ * that can do nothing is worse than not being there. Companion's fps stays visible even
+ * though it has one stop — like the single camera and its sizes, showing it is how the
+ * ceiling is visible.
  */
 export function fieldsFor(backend: StreamConfig["backend"]): Field[] {
-  return backend === "companion"
-    ? ["device", "camera", "size", "zoom", "bitrate", "orientation", "aspect", "sink"]
-    : FIELDS.filter((f) => f !== "aspect")
+  return backend === "companion" ? FIELDS.filter((f) => f !== "buffer") : [...FIELDS]
 }
 
 const BITRATES = ["4M", "8M", "16M", "24M", "32M"]
@@ -295,8 +295,7 @@ export function Setup(props: {
     }
     if (key.name === "1") setField("camera")
     if (key.name === "2") setField("size")
-    // Companion has no fps stepper to land on — see fieldsFor.
-    if (key.name === "3" && fieldsFor(config?.backend ?? "scrcpy").includes("fps")) setField("fps")
+    if (key.name === "3") setField("fps")
     if (key.name === "w" && !busy) void toggleTransport()
     if (key.name === "return" && config && !busy) props.onStart(config)
   })
@@ -393,18 +392,16 @@ export function Setup(props: {
               width: wide ? 34 : "100%",
             }}
           >
-            {!companion && (
-              <Stepper
-                label="fps"
-                focused={field === "fps"}
-                options={stops.map(fpsLabel)}
-                index={Math.max(
-                  0,
-                  stops.findIndex((s) => s.fps === config.fps && s.highSpeed === config.highSpeed),
-                )}
-                onChange={(i) => setConfig({ ...config, fps: stops[i].fps, highSpeed: stops[i].highSpeed })}
-              />
-            )}
+            <Stepper
+              label="fps"
+              focused={field === "fps"}
+              options={stops.map(fpsLabel)}
+              index={Math.max(
+                0,
+                stops.findIndex((s) => s.fps === config.fps && s.highSpeed === config.highSpeed),
+              )}
+              onChange={(i) => setConfig({ ...config, fps: stops[i].fps, highSpeed: stops[i].highSpeed })}
+            />
             <Stepper
               label="zoom"
               bar
@@ -428,16 +425,14 @@ export function Setup(props: {
               index={Math.max(0, ORIENTATIONS.indexOf(config.orientation))}
               onChange={(i) => setConfig({ ...config, orientation: ORIENTATIONS[i] })}
             />
-            {companion && (
-              <Stepper
-                label="aspect"
-                compact
-                focused={field === "aspect"}
-                options={[...ASPECTS]}
-                index={Math.max(0, ASPECTS.indexOf(config.aspect))}
-                onChange={(i) => setConfig({ ...config, aspect: ASPECTS[i] })}
-              />
-            )}
+            <Stepper
+              label="aspect"
+              compact
+              focused={field === "aspect"}
+              options={[...ASPECTS]}
+              index={Math.max(0, ASPECTS.indexOf(config.aspect))}
+              onChange={(i) => setConfig({ ...config, aspect: ASPECTS[i] })}
+            />
             {!companion && (
               <Stepper
                 label="buffer"

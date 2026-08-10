@@ -164,28 +164,21 @@ describe("zoomStops", () => {
 })
 
 describe("fieldsFor", () => {
-  // A stepper that can do nothing is worse than not being there. Companion: fps (ffmpeg's
-  // -r must match the actual stream rate) and buffer (a scrcpy flag) go; zoom/bitrate ride
-  // the intent extras and rotate/aspect are ffmpeg filters, so they stay. scrcpy: aspect
-  // goes — that path has no crop stage.
-  test("the companion path drops every field it cannot honour", () => {
-    expect(fieldsFor("companion")).toEqual([
-      "device",
-      "camera",
-      "size",
-      "zoom",
-      "bitrate",
-      "orientation",
-      "aspect",
-      "sink",
-    ])
+  // One menu, both backends. The only drop is the v4l2 buffer on companion — a scrcpy
+  // flag ffmpeg has no equivalent for, and a stepper that can do nothing is worse than
+  // not being there. fps stays with its single stop: showing it is how the ceiling is
+  // visible, like the single camera.
+  test("the two backends differ only by the buffer field", () => {
+    expect(fieldsFor("companion")).toEqual(fieldsFor("scrcpy").filter((f) => f !== "buffer"))
+    expect(fieldsFor("companion")).toContain("fps")
+    expect(fieldsFor("companion")).toContain("aspect")
   })
 
-  test("the scrcpy path keeps everything but aspect", () => {
+  test("the scrcpy path keeps every field", () => {
     expect(fieldsFor("scrcpy")).toContain("bitrate")
     expect(fieldsFor("scrcpy")).toContain("zoom")
     expect(fieldsFor("scrcpy")).toContain("buffer")
-    expect(fieldsFor("scrcpy")).not.toContain("aspect")
+    expect(fieldsFor("scrcpy")).toContain("aspect")
   })
 })
 

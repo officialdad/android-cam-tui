@@ -110,8 +110,10 @@ const ROTATE_FILTER: Record<StreamConfig["orientation"], string> = {
  * Centered crop to the requested aspect. Expression-based on iw/ih rather than computed
  * from the config: the phone clamps the requested size to what its camera offers and
  * there is no reply channel, so the config's size is not what necessarily arrives —
- * ffmpeg's own view of the decoded stream is. Quoted so the commas inside min() survive
- * the filtergraph parser (the args go through Bun.spawn, no shell to strip them).
+ * ffmpeg's own view of the decoded stream is. (The scrcpy path computes the numbers
+ * instead — `cropFor` in config.ts — because its sizes are exact.) Quoted so the commas
+ * inside min() survive the filtergraph parser (the args go through Bun.spawn, no shell
+ * to strip them).
  */
 const ASPECT_FILTER: Record<StreamConfig["aspect"], string> = {
   native: "",
@@ -125,14 +127,15 @@ const ASPECT_FILTER: Record<StreamConfig["aspect"], string> = {
  * Annex-B carries no timestamps, so without it ffmpeg guesses a 1200k tbr for the input
  * and drops ~98% of the frames converting down. Do not move it to the output side. `fps`
  * must match what the phone actually streams — see the COMPANION_CAM note on why it is
- * not user-selectable. Filter order: rotate first so the aspect crop sees the final
- * orientation's width/height.
+ * not user-selectable. Filter order: crop first, then rotate — scrcpy applies --crop
+ * before --capture-orientation, and the two backends must not disagree about what an
+ * aspect means under rotation.
  */
 export function ffmpegArgs(
   port: number,
   c: Pick<StreamConfig, "sink" | "fps" | "orientation" | "aspect">,
 ): string[] {
-  const vf = [ROTATE_FILTER[c.orientation], ASPECT_FILTER[c.aspect], "format=yuv420p"]
+  const vf = [ASPECT_FILTER[c.aspect], ROTATE_FILTER[c.orientation], "format=yuv420p"]
     .filter(Boolean)
     .join(",")
   return [

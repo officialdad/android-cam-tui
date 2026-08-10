@@ -107,7 +107,8 @@ android-cam-tui --start    # skip setup, stream the last-used config
 From source, `bun start` and `bun start --start`.
 
 Setup screen: a device row, then three columns — camera, resolution, and output
-(fps/zoom/bitrate/rotate/buffer/sink), all probed live. `Tab`/`Shift-Tab` move
+(fps/zoom/bitrate/rotate/aspect/buffer/sink), all probed live. The same menu on
+both backends; only `buffer` is scrcpy-specific. `Tab`/`Shift-Tab` move
 between fields, `1`-`3` jump to a column, `↑↓` pick from a list, `←→` adjust,
 `/` filters a list (`Esc` clears), `Enter` starts. Under 100 columns wide it
 shows one section at a time.
@@ -119,6 +120,8 @@ rate in low light, since auto-exposure lengthens the exposure time.
 
 `rotate` maps to scrcpy's `--capture-orientation`, so it rotates what reaches the
 v4l2 device (not just a preview window) — use it when the phone sits in a mount.
+`aspect` is a centered crop to 16:9, 4:3 or 1:1 (scrcpy's `--crop`; an ffmpeg
+crop on the companion backend), applied before the rotation on both.
 
 ## Wireless
 
