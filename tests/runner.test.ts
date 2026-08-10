@@ -195,6 +195,27 @@ describe("StreamRunner", () => {
     expect(r.state).toBe("stopped")
   })
 
+  // Bun.spawn throws *synchronously* when the executable is missing. The doctor no longer
+  // guarantees ffmpeg exists here — the companion prerequisites only warn when some other
+  // phone works — so a bare spawn would reject `await this.spawn()` inside the unawaited
+  // `void this.onExit(null)` and surface as an unhandled rejection nobody can see.
+  test("a missing ffmpeg is reported through onEvent, not thrown out of spawn", async () => {
+    const { events, onEvent } = collect()
+    const r = new StreamRunner({
+      adbPath: fakeScrcpy(`case "$*" in *"/proc/net/unix"*) ${UNIX_READY};; esac`),
+      ffmpegPath: "/nonexistent/ffmpeg",
+      restartDelayMs: 20,
+      maxAttempts: 1,
+      onEvent,
+    })
+    await r.start(COMPANION)
+    await waitFor(() => events.some((e) => e.kind === "gave-up"))
+    await r.stop()
+    const exited = events.find((e) => e.kind === "exited") as Extract<StreamEvent, { kind: "exited" }>
+    expect(exited.reason).toContain("ffmpeg")
+    expect(events.map((e) => e.kind)).toContain("restarting")
+  })
+
   // A phone still booting is exactly what retries are for, so a prep failure has to land in
   // the same backoff path as a stream that died — not as an unhandled rejection.
   test("a prep failure reports the reason and retries", async () => {

@@ -124,23 +124,28 @@ export class StreamRunner {
     this.lastLine = null
     this.lastError = null
     live.add(this)
-    if (this.config.backend === "companion") {
-      try {
+    try {
+      if (this.config.backend === "companion") {
         await prepPhone(this.config.serial, this.adbPath)
-      } catch (e) {
         if (this.epoch !== myEpoch) return
-        // A phone still booting is what retries are for: report the cause and fall into the
-        // same backoff a mid-stream death takes, rather than rejecting out of start().
-        this.lastError = e instanceof Error ? e.message : String(e)
-        void this.onExit(null)
-        return
       }
+      // Inside the try because `Bun.spawn` throws *synchronously* on a missing executable,
+      // and the doctor no longer proves ffmpeg is there: the companion prerequisites only
+      // warn when some other phone works, so the user can start past a yellow line. Bare,
+      // that throw rejects the unawaited `void this.onExit(null)` below — an unhandled
+      // rejection instead of a message.
+      this.proc = Bun.spawn(this.command(), {
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+    } catch (e) {
       if (this.epoch !== myEpoch) return
+      // A phone still booting is what retries are for: report the cause and fall into the
+      // same backoff a mid-stream death takes, rather than rejecting out of start().
+      this.lastError = e instanceof Error ? e.message : String(e)
+      void this.onExit(null)
+      return
     }
-    this.proc = Bun.spawn(this.command(), {
-      stdout: "pipe",
-      stderr: "pipe",
-    })
     this.onEvent({ kind: "started" })
     this.watch(this.proc.stdout as ReadableStream)
     this.watch(this.proc.stderr as ReadableStream)
