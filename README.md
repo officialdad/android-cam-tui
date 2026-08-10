@@ -35,6 +35,29 @@ do not stop you.
 `c` needs `wl-copy` (wayland) or `xclip` (x11); without one, `--doctor` prints
 the same thing to stdout.
 
+## Older phones
+
+Camera mirroring needs Android 12 (API 31) — scrcpy's `--video-source=camera`
+doesn't work below it. `android-cam-tui` covers those phones with a companion
+app instead: a foreground service, vendored into this binary, that opens the
+camera itself and pipes H.264 to a socket for `ffmpeg` to decode into the sink.
+It has no activity, so the phone is never woken or unlocked to run it. Source:
+[officialdad/android-cam](https://github.com/officialdad/android-cam).
+
+`--doctor` detects a phone below API 31 on its own and adds three checks:
+`ffmpeg` on PATH, the app installed, and the app holding camera permission. The
+APK ships inside this binary and is written out to
+`~/.cache/android-cam-tui/android-cam.apk` the moment an old phone shows up, so
+the install fix is just `adb install -r -g ~/.cache/android-cam-tui/android-cam.apk`
+— `c` puts it on the clipboard like any other fix line. `-g` grants the camera
+permission on most ROMs; the few that refuse need a manual
+`adb shell pm grant com.officialdad.androidcam android.permission.CAMERA`, which
+is its own check.
+
+The stream is fixed at 1280x720@30 with no zoom, torch or rotation — the app
+compiles those in and has no channel back to the host to change them. That
+ceiling is scheduled to lift, not permanent.
+
 ## Install
 
 ```bash
