@@ -155,13 +155,37 @@ describe("checks", () => {
     expect(blocked({ ...OK, ffmpeg: null, devices })).toEqual([])
   })
 
-  // One working handset satisfies everything, the way the other device checks already work.
-  test("one modern phone clears the companion checks for an old sibling", () => {
-    const devices: DeviceInfo[] = [
-      { ...READY, companion: { installed: false, granted: false } },
-      { serial: "NEW", model: "", wireless: false, state: "device", sdk: 34 },
-    ]
-    expect(blocked({ ...OK, ffmpeg: null, devices })).toEqual([])
+  // Backend selection is per selected device, not per fleet: a modern sibling does not make
+  // the old phone streamable, it only means the user is not stuck. So the prerequisites are
+  // still reported — as warnings — rather than going silent and failing 90 seconds later.
+  const MODERN: DeviceInfo = { serial: "NEW", model: "", wireless: false, state: "device", sdk: 34 }
+
+  test("a modern sibling downgrades the companion checks to warnings, not silence", () => {
+    const devices: DeviceInfo[] = [{ ...READY, companion: { installed: false, granted: false } }, MODERN]
+    const env = { ...OK, ffmpeg: null, devices }
+    expect(blocked(env)).toEqual([])
+    expect(failed(env)).toEqual(["ffmpeg", "companion-apk"])
+  })
+
+  test("with no modern sibling the same environment blocks", () => {
+    const devices: DeviceInfo[] = [{ ...READY, companion: { installed: false, granted: false } }]
+    expect(blocked({ ...OK, ffmpeg: null, devices })).toEqual(["ffmpeg", "companion-apk"])
+  })
+
+  // `am start-foreground-service` landed in Android 8.0, so the companion path has a floor
+  // of its own. Below it nothing installs its way out, and telling the user to install the
+  // APK would be advice that cannot work.
+  test("a phone below the companion floor blocks on the floor alone", () => {
+    const devices = [{ ...READY, sdk: 23, companion: { installed: false, granted: false } }]
+    expect(blocked({ ...OK, devices })).toEqual(["device-android"])
+    const fix = find({ ...OK, devices }, "device-android").fix.join("\n")
+    expect(fix).toContain("Android 8")
+    expect(fix).not.toContain("adb install")
+  })
+
+  test("api 26 exactly is served by the companion path, not the floor block", () => {
+    const devices = [{ ...READY, sdk: 26 }]
+    expect(blocked({ ...OK, devices })).toEqual([])
   })
 
   test("the apk fix names the cache path, and falls back when the write failed", () => {

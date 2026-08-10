@@ -74,6 +74,14 @@ const MIN_SCRCPY: [number, number] = [3, 0]
 export const MIN_SDK = 31
 
 /**
+ * Android 8.0. The APK's own manifest says 21, but `prepPhone` drives the service with
+ * `am start-foreground-service`, and that `am` subcommand does not exist before 8.0 — an
+ * older phone installs the APK fine and then fails invisibly. Nothing installs its way
+ * out of this one, so it is a hard floor rather than a prerequisite.
+ */
+export const COMPANION_MIN_SDK = 26
+
+/**
  * The one place the floor is compared. An undefined sdk means the phone never answered
  * `getprop` — unauthorized, offline, mid-boot — and each of those has its own check, so
  * it is not treated as old.
@@ -162,10 +170,16 @@ export function checks(env: Env): Check[] {
   // the floor is provably too old, and every other device state has a check of its own.
   const usable = env.devices.some((d) => d.state === "device" && (d.sdk ?? MIN_SDK) >= MIN_SDK)
   // An old phone is serviceable now, so this is no longer a failure — it is the trigger for
-  // a different set of prerequisites. `needsCompanion` follows the same mutual exclusion the
-  // other device checks use: one working modern handset satisfies everything.
+  // a different set of prerequisites. Unlike the checks above, these are *not* mutually
+  // exclusive with a working modern handset: the backend is chosen per selected device, so
+  // "some other phone works" does not answer "will the one you are about to pick work?".
+  // A modern sibling only decides how loud the answer is.
   const old = env.devices.find((d) => d.state === "device" && d.sdk !== undefined && d.sdk < MIN_SDK)
-  const needsCompanion = !usable && old !== undefined
+  const level: Level = usable ? "warn" : "block"
+  // Below the companion floor there is nothing to install, so the prerequisites below stay
+  // quiet rather than handing out advice that cannot work.
+  const tooOld = old !== undefined && old.sdk! < COMPANION_MIN_SDK
+  const needsCompanion = old !== undefined && !tooOld
   const companion = old?.companion
   const unauthorized = env.devices.some((d) => d.state === "unauthorized")
   // `offline` is its own diagnosis: adb sees the phone but adbd is not answering — asleep,
@@ -252,15 +266,26 @@ export function checks(env: Env): Check[] {
       ],
     },
     {
+      id: "device-android",
+      level,
+      ok: !tooOld,
+      detail: `phone runs API ${old?.sdk ?? ""} — too old for either stream backend`,
+      fix: [
+        "# scrcpy cannot mirror a camera before Android 12, and the companion app",
+        "# is launched with `am start-foreground-service`, added in Android 8.0",
+        "# nothing installs its way past this — use a newer phone",
+      ],
+    },
+    {
       id: "ffmpeg",
-      level: "block",
+      level,
       ok: !needsCompanion || env.ffmpeg !== null,
       detail: "ffmpeg is not on PATH — the companion backend streams through it",
       fix: pkg.ffmpeg,
     },
     {
       id: "companion-apk",
-      level: "block",
+      level,
       ok: !needsCompanion || (companion?.installed ?? false),
       detail: `phone runs API ${old?.sdk ?? ""} — it needs the Android Cam companion app`,
       fix: [
@@ -273,7 +298,7 @@ export function checks(env: Env): Check[] {
     },
     {
       id: "companion-perm",
-      level: "block",
+      level,
       ok: !needsCompanion || !companion?.installed || companion.granted,
       detail: "Android Cam has no camera permission — this ROM refused `install -g`",
       fix: [
