@@ -164,23 +164,30 @@ const atLeast = (v: [number, number], min: [number, number]) =>
 
 export function checks(env: Env): Check[] {
   const pkg = PKGS[env.distro]
-  // The device checks are mutually exclusive: one usable phone satisfies all of them, so a
-  // second handset stuck unauthorized never blocks a working session.
-  // An unknown sdk counts as usable: only a phone that answered getprop with a number below
-  // the floor is provably too old, and every other device state has a check of its own.
-  const usable = env.devices.some((d) => d.state === "device" && (d.sdk ?? MIN_SDK) >= MIN_SDK)
-  // An old phone is serviceable now, so this is no longer a failure — it is the trigger for
-  // a different set of prerequisites. Unlike the checks above, these are *not* mutually
-  // exclusive with a working modern handset: the backend is chosen per selected device, so
+  // The device *state* checks are mutually exclusive: one usable phone satisfies all of
+  // them, so a second handset stuck unauthorized never blocks a working session.
+  // The api-level ones below are not, because the backend is chosen per selected device:
   // "some other phone works" does not answer "will the one you are about to pick work?".
-  // A modern sibling only decides how loud the answer is.
-  const old = env.devices.find((d) => d.state === "device" && d.sdk !== undefined && d.sdk < MIN_SDK)
-  const level: Level = usable ? "warn" : "block"
-  // Below the companion floor there is nothing to install, so the prerequisites below stay
-  // quiet rather than handing out advice that cannot work.
-  const tooOld = old !== undefined && old.sdk! < COMPANION_MIN_SDK
-  const needsCompanion = old !== undefined && !tooOld
+  // Two bands, split at the companion floor and disjoint by construction — which is what
+  // stops `device-android` and the three companion checks ever describing the same phone,
+  // however many old handsets are attached.
+  const tooOld = env.devices.find((d) => d.state === "device" && d.sdk !== undefined && d.sdk < COMPANION_MIN_SDK)
+  const old = env.devices.find(
+    (d) => d.state === "device" && d.sdk !== undefined && d.sdk >= COMPANION_MIN_SDK && d.sdk < MIN_SDK,
+  )
+  const needsCompanion = old !== undefined
   const companion = old?.companion
+  // An unknown sdk counts as usable: only a phone that answered getprop with a number below
+  // the floor is provably too old, and every other device state has a check of its own. A
+  // phone the companion path can serve *right now* counts too — it is a working handset, so
+  // neither an ancient sibling nor an unauthorized one may hand the screen to <Doctor> in
+  // front of it.
+  const usable =
+    env.devices.some((d) => d.state === "device" && (d.sdk ?? MIN_SDK) >= MIN_SDK) ||
+    (needsCompanion && env.ffmpeg !== null && (companion?.granted ?? false))
+  // One usable handset never makes an unusable one work; it only decides how loud the
+  // report about it is.
+  const level: Level = usable ? "warn" : "block"
   const unauthorized = env.devices.some((d) => d.state === "unauthorized")
   // `offline` is its own diagnosis: adb sees the phone but adbd is not answering — asleep,
   // mid-boot, or restarting after `adb tcpip`. udev rules fix none of that.
@@ -268,8 +275,8 @@ export function checks(env: Env): Check[] {
     {
       id: "device-android",
       level,
-      ok: !tooOld,
-      detail: `phone runs API ${old?.sdk ?? ""} — too old for either stream backend`,
+      ok: tooOld === undefined,
+      detail: `phone runs API ${tooOld?.sdk ?? ""} — too old for either stream backend`,
       fix: [
         "# scrcpy cannot mirror a camera before Android 12, and the companion app",
         "# is launched with `am start-foreground-service`, added in Android 8.0",

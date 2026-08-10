@@ -183,6 +183,27 @@ describe("checks", () => {
     expect(fix).not.toContain("adb install")
   })
 
+  // Two old phones do not share a verdict either. The sub-8 handset is a dead end, the
+  // Android 10 one is exactly what the companion path is for, and each check names its own
+  // API level — so both are reported and neither describes the other's phone.
+  test("an all-old fleet reports the floor and the companion prerequisites separately", () => {
+    const devices = [
+      { ...READY, serial: "ANCIENT", sdk: 23, companion: { installed: false, granted: false } },
+      { ...READY, companion: { installed: false, granted: false } },
+    ]
+    expect(blocked({ ...OK, devices })).toEqual(["device-android", "companion-apk"])
+    expect(find({ ...OK, devices }, "device-android").detail).toContain("API 23")
+    expect(find({ ...OK, devices }, "companion-apk").detail).toContain("API 29")
+  })
+
+  // ...and once that Android 10 phone is actually serviceable it is a working handset, so
+  // the dead-end sibling drops to a warning rather than locking the user out of it.
+  test("a companion-ready phone keeps an ancient sibling from blocking the screen", () => {
+    const devices = [{ ...READY, serial: "ANCIENT", sdk: 23 }, READY]
+    expect(blocked({ ...OK, devices })).toEqual([])
+    expect(failed({ ...OK, devices })).toEqual(["device-android"])
+  })
+
   test("api 26 exactly is served by the companion path, not the floor block", () => {
     const devices = [{ ...READY, sdk: 26 }]
     expect(blocked({ ...OK, devices })).toEqual([])
