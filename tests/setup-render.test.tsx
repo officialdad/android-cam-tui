@@ -10,11 +10,13 @@ const HEALTHY: Env = {
   scrcpy: "/usr/bin/scrcpy",
   adb: "/usr/bin/adb",
   v4l2ctl: "/usr/bin/v4l2-ctl",
+  ffmpeg: "/usr/bin/ffmpeg",
   player: "/usr/bin/mpv",
   scrcpyVersion: [4, 1],
   sinks: [{ label: "Phone Cam", path: "/dev/video3" }],
   devices: [{ serial: "R5CT", model: "SM_S911B", wireless: false, state: "device" }],
   distro: "debian",
+  apkPath: null,
 }
 
 /** A fresh Ubuntu box that just ran the curl installer: nothing else is there yet. */

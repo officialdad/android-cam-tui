@@ -1,3 +1,5 @@
+import type { CompanionState } from "../companion"
+
 export interface DeviceInfo {
   serial: string
   model: string
@@ -5,6 +7,8 @@ export interface DeviceInfo {
   state: string
   /** `ro.build.version.sdk`. Undefined when the device is not reachable enough to ask. */
   sdk?: number
+  /** Only filled for phones below MIN_SDK — nothing else needs the companion app. */
+  companion?: CompanionState
 }
 
 const WIRELESS_RE = /^\d{1,3}(?:\.\d{1,3}){3}:\d+$/

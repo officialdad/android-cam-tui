@@ -1,3 +1,4 @@
+import { APK_CACHE, companionState, materializeApk, PKG } from "./companion"
 import type { StreamConfig } from "./config"
 import { listDevices, type DeviceInfo } from "./scrcpy/devices"
 import { probeSinks, type SinkInfo } from "./scrcpy/probe"
@@ -49,12 +50,16 @@ export interface Env {
   scrcpy: string | null
   adb: string | null
   v4l2ctl: string | null
+  /** The companion backend pipes the phone's H.264 through it into the sink. */
+  ffmpeg: string | null
   /** First of ffplay/mpv/vlc found, for the dashboard's `p` preview. */
   player: string | null
   scrcpyVersion: [number, number] | null
   sinks: SinkInfo[]
   devices: DeviceInfo[]
   distro: Distro
+  /** Where `probeEnv` put the vendored APK, for the install fix line. Null if it could not. */
+  apkPath: string | null
 }
 
 /** Camera capture predates the 4.x line, so this is a warning floor, not a hard gate. */
@@ -81,6 +86,7 @@ interface Pkgs {
   scrcpy: string[]
   adb: string[]
   v4l2ctl: string[]
+  ffmpeg: string[]
   module: string[]
   udev: string[]
 }
@@ -90,6 +96,7 @@ const PKGS: Record<Distro, Pkgs> = {
     scrcpy: ["sudo pacman -S scrcpy"],
     adb: ["sudo pacman -S android-tools"],
     v4l2ctl: ["sudo pacman -S v4l-utils"],
+    ffmpeg: ["sudo pacman -S ffmpeg"],
     module: ["sudo pacman -S v4l2loopback-dkms"],
     udev: ["sudo pacman -S android-udev", "sudo usermod -aG adbusers $USER"],
   },
@@ -97,6 +104,7 @@ const PKGS: Record<Distro, Pkgs> = {
     scrcpy: ["sudo apt install scrcpy"],
     adb: ["sudo apt install adb"],
     v4l2ctl: ["sudo apt install v4l-utils"],
+    ffmpeg: ["sudo apt install ffmpeg"],
     module: ["sudo apt install v4l2loopback-dkms"],
     udev: ["sudo apt install android-sdk-platform-tools-common", "sudo usermod -aG plugdev $USER"],
   },
@@ -108,6 +116,7 @@ const PKGS: Record<Distro, Pkgs> = {
     ],
     adb: ["sudo dnf install android-tools"],
     v4l2ctl: ["sudo dnf install v4l-utils"],
+    ffmpeg: ["sudo dnf install ffmpeg-free"],
     module: ["sudo dnf install akmod-v4l2loopback"],
     udev: ["sudo dnf install android-tools"],
   },
@@ -115,6 +124,7 @@ const PKGS: Record<Distro, Pkgs> = {
     scrcpy: ["sudo zypper install scrcpy"],
     adb: ["sudo zypper install android-tools"],
     v4l2ctl: ["sudo zypper install v4l-utils"],
+    ffmpeg: ["sudo zypper install ffmpeg"],
     module: ["sudo zypper install v4l2loopback-kmp-default"],
     udev: ["sudo zypper install android-tools"],
   },
@@ -122,6 +132,7 @@ const PKGS: Record<Distro, Pkgs> = {
     scrcpy: ["# https://github.com/Genymobile/scrcpy/blob/master/doc/linux.md"],
     adb: ["# https://developer.android.com/tools/releases/platform-tools"],
     v4l2ctl: ["# install v4l-utils with your package manager"],
+    ffmpeg: ["# install ffmpeg with your package manager"],
     module: ["# https://github.com/v4l2loopback/v4l2loopback#install"],
     udev: ["# https://github.com/M0Rf30/android-udev-rules"],
   },
@@ -150,7 +161,12 @@ export function checks(env: Env): Check[] {
   // An unknown sdk counts as usable: only a phone that answered getprop with a number below
   // the floor is provably too old, and every other device state has a check of its own.
   const usable = env.devices.some((d) => d.state === "device" && (d.sdk ?? MIN_SDK) >= MIN_SDK)
-  const tooOld = env.devices.find((d) => d.state === "device" && d.sdk !== undefined && d.sdk < MIN_SDK)
+  // An old phone is serviceable now, so this is no longer a failure — it is the trigger for
+  // a different set of prerequisites. `needsCompanion` follows the same mutual exclusion the
+  // other device checks use: one working modern handset satisfies everything.
+  const old = env.devices.find((d) => d.state === "device" && d.sdk !== undefined && d.sdk < MIN_SDK)
+  const needsCompanion = !usable && old !== undefined
+  const companion = old?.companion
   const unauthorized = env.devices.some((d) => d.state === "unauthorized")
   // `offline` is its own diagnosis: adb sees the phone but adbd is not answering — asleep,
   // mid-boot, or restarting after `adb tcpip`. udev rules fix none of that.
@@ -236,14 +252,33 @@ export function checks(env: Env): Check[] {
       ],
     },
     {
-      id: "device-android",
+      id: "ffmpeg",
       level: "block",
-      ok: usable || !tooOld,
-      detail: `phone runs API ${tooOld?.sdk ?? ""} — camera capture needs Android 12 (API ${MIN_SDK})`,
+      ok: !needsCompanion || env.ffmpeg !== null,
+      detail: "ffmpeg is not on PATH — the companion backend streams through it",
+      fix: pkg.ffmpeg,
+    },
+    {
+      id: "companion-apk",
+      level: "block",
+      ok: !needsCompanion || (companion?.installed ?? false),
+      detail: `phone runs API ${old?.sdk ?? ""} — it needs the Android Cam companion app`,
       fix: [
-        "# nothing to install: scrcpy cannot mirror a camera before Android 12",
-        "# https://github.com/Genymobile/scrcpy/issues/4213",
-        "# use a newer phone, or an IP-webcam app instead",
+        "# scrcpy cannot mirror a camera before Android 12, so an installed app",
+        "# holding its own CAMERA permission streams it instead",
+        env.apkPath
+          ? `adb install -r -g ${env.apkPath}`
+          : "# build it: https://github.com/officialdad/android-cam",
+      ],
+    },
+    {
+      id: "companion-perm",
+      level: "block",
+      ok: !needsCompanion || !companion?.installed || companion.granted,
+      detail: "Android Cam has no camera permission — this ROM refused `install -g`",
+      fix: [
+        `adb shell pm grant ${PKG} android.permission.CAMERA`,
+        "# or by hand: Settings > Apps > Android Cam > Permissions > Camera",
       ],
     },
     {
@@ -288,15 +323,30 @@ export async function probeEnv(): Promise<Env> {
     Bun.file("/etc/os-release").text().catch(() => ""),
     scrcpy ? run([scrcpy, "--version"]) : Promise.resolve(""),
   ])
+  // Only phones that provably answered below the floor need the companion app, so nothing
+  // else is asked and nothing is written on a modern-phone-only machine.
+  const old = devices.filter((d) => d.state === "device" && d.sdk !== undefined && d.sdk < MIN_SDK)
+  // Kept as two entries rather than a spread, so this stays a tuple and `apkPath` keeps
+  // its `string | null` type instead of widening to include the probes' void.
+  const [apkPath] = await Promise.all([
+    old.length > 0 ? materializeApk(APK_CACHE) : Promise.resolve(null),
+    Promise.all(
+      old.map(async (d) => {
+        d.companion = await companionState(d.serial)
+      }),
+    ),
+  ])
   return {
     scrcpy,
     adb: Bun.which("adb"),
     v4l2ctl: Bun.which("v4l2-ctl"),
+    ffmpeg: Bun.which("ffmpeg"),
     player: PLAYERS.map((p) => Bun.which(p)).find((p) => p !== null) ?? null,
     scrcpyVersion: parseScrcpyVersion(versionText),
     sinks,
     devices,
     distro: detectDistro(osRelease),
+    apkPath,
   }
 }
 

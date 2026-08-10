@@ -48,11 +48,13 @@ const OK: Env = {
   scrcpy: "/usr/bin/scrcpy",
   adb: "/usr/bin/adb",
   v4l2ctl: "/usr/bin/v4l2-ctl",
+  ffmpeg: "/usr/bin/ffmpeg",
   player: "/usr/bin/mpv",
   scrcpyVersion: [4, 1],
   sinks: [{ label: "Phone Cam", path: "/dev/video3" }],
   devices: [{ serial: "R5CT", model: "SM_S911B", wireless: false, state: "device" }],
   distro: "arch",
+  apkPath: "~/.cache/android-cam-tui/android-cam.apk",
 }
 
 const failed = (env: Env) => checks(env).filter((c) => !c.ok).map((c) => c.id)
@@ -113,24 +115,66 @@ describe("checks", () => {
     }
   })
 
-  // `--list-cameras` answers on Android 10, so this phone looks healthy right up to the
-  // moment capture starts and dies with "Server connection failed". Block it in the doctor.
-  test("a phone below Android 12 blocks on its own check", () => {
-    const devices: DeviceInfo[] = [{ serial: "e410cff1", model: "CPH1931", wireless: false, state: "device", sdk: 29 }]
-    expect(blocked({ ...OK, devices })).toEqual(["device-android"])
-    expect(find({ ...OK, devices }, "device-android").detail).toContain("29")
+  // Android 10 answers `--list-cameras` fine and only dies once capture starts, so this
+  // used to be a hard block. The companion APK serves it instead; what the doctor reports
+  // now is what that path still needs.
+  const READY: DeviceInfo = {
+    serial: "e410cff1",
+    model: "CPH1931",
+    wireless: false,
+    state: "device",
+    sdk: 29,
+    companion: { installed: true, granted: true },
+  }
+
+  test("an old phone with the companion app ready blocks on nothing", () => {
+    expect(blocked({ ...OK, devices: [READY] })).toEqual([])
+  })
+
+  test("an old phone with no companion app blocks on the install", () => {
+    const devices = [{ ...READY, companion: { installed: false, granted: false } }]
+    expect(blocked({ ...OK, devices })).toEqual(["companion-apk"])
+    expect(find({ ...OK, devices }, "companion-apk").fix.join("\n")).toContain("adb install -r -g")
+  })
+
+  // The grant is a separate failure with a separate remedy, and firing both at once would
+  // have the user install an app that is already installed.
+  test("an installed but ungranted app blocks on the permission alone", () => {
+    const devices = [{ ...READY, companion: { installed: true, granted: false } }]
+    expect(blocked({ ...OK, devices })).toEqual(["companion-perm"])
+    expect(find({ ...OK, devices }, "companion-perm").fix.join("\n")).toContain("pm grant")
+  })
+
+  test("the companion path blocks without ffmpeg, and only for an old phone", () => {
+    expect(blocked({ ...OK, ffmpeg: null, devices: [READY] })).toEqual(["ffmpeg"])
+    expect(blocked({ ...OK, ffmpeg: null })).toEqual([])
+  })
+
+  test("a modern phone raises no companion checks at all", () => {
+    const devices: DeviceInfo[] = [{ serial: "NEW", model: "", wireless: false, state: "device", sdk: 34 }]
+    expect(blocked({ ...OK, ffmpeg: null, devices })).toEqual([])
+  })
+
+  // One working handset satisfies everything, the way the other device checks already work.
+  test("one modern phone clears the companion checks for an old sibling", () => {
+    const devices: DeviceInfo[] = [
+      { ...READY, companion: { installed: false, granted: false } },
+      { serial: "NEW", model: "", wireless: false, state: "device", sdk: 34 },
+    ]
+    expect(blocked({ ...OK, ffmpeg: null, devices })).toEqual([])
+  })
+
+  test("the apk fix names the cache path, and falls back when the write failed", () => {
+    const devices = [{ ...READY, companion: { installed: false, granted: false } }]
+    expect(find({ ...OK, devices }, "companion-apk").fix.join("\n")).toContain(
+      "~/.cache/android-cam-tui/android-cam.apk",
+    )
+    const fix = find({ ...OK, devices, apkPath: null }, "companion-apk").fix.join("\n")
+    expect(fix).toContain("github.com/officialdad/android-cam")
   })
 
   test("an unknown sdk is not treated as too old", () => {
     expect(blocked(OK)).toEqual([])
-  })
-
-  test("one modern phone clears the android check for an old sibling", () => {
-    const devices: DeviceInfo[] = [
-      { serial: "OLD", model: "", wireless: false, state: "device", sdk: 29 },
-      { serial: "NEW", model: "", wireless: false, state: "device", sdk: 34 },
-    ]
-    expect(blocked({ ...OK, devices })).toEqual([])
   })
 
   test("one usable device clears every device check", () => {
@@ -199,6 +243,7 @@ describe("fixScript", () => {
     scrcpy: null,
     adb: null,
     v4l2ctl: null,
+    ffmpeg: null,
     player: null,
     scrcpyVersion: [2, 1],
     sinks: [],

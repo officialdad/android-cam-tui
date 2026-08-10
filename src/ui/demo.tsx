@@ -35,11 +35,13 @@ createRoot(renderer).render(
         scrcpy: "/usr/bin/scrcpy",
         adb: "/usr/bin/adb",
         v4l2ctl: "/usr/bin/v4l2-ctl",
+        ffmpeg: "/usr/bin/ffmpeg",
         player: "/usr/bin/mpv",
         scrcpyVersion: [4, 1],
         sinks: SINKS,
         devices: DEVICES,
         distro: "arch",
+        apkPath: null,
       }),
     }}
     onStart={() => {
