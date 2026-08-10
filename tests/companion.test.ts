@@ -126,6 +126,16 @@ describe("prepPhone", () => {
     expect(prepPhone("R5CT", bin, 2)).rejects.toThrow(/pm grant/)
   })
 
+  // `am` reports its real failures on stdout with exit code 0 — an Android below 8.0 has no
+  // `start-foreground-service` at all. Without reading that, every one of those collapses
+  // into the same 6-second timeout and a camera-permission hint that is wrong.
+  test("an `am` error is reported instead of waiting out the socket poll", async () => {
+    const bin = fakeAdb(
+      `case "$*" in *start-foreground-service*) echo "Error: Unknown command: start-foreground-service";; esac`,
+    )
+    expect(prepPhone("R5CT", bin)).rejects.toThrow(/Unknown command/)
+  })
+
   test("a failed forward is reported rather than swallowed", async () => {
     const bin = fakeAdb(`case "$*" in *forward*) echo "error: device offline" >&2; exit 1;; esac`)
     expect(prepPhone("R5CT", bin)).rejects.toThrow(/device offline/)

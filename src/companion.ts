@@ -117,7 +117,13 @@ export async function prepPhone(serial: string | null, adbPath = "adb", tries = 
   // Idempotent, so it is re-run on every spawn rather than tracked and torn down.
   const fwd = await adb([...base, "forward", `tcp:${PORT}`, `localabstract:${SOCKET}`])
   if (fwd.code !== 0) throw new Error(fwd.out.trim() || "adb forward failed")
-  await adb([...base, "shell", "am", "start-foreground-service", "-n", `${PKG}/.CamService`])
+  // `am` reports its real failures on stdout with exit code 0: no such subcommand on an
+  // Android below 8.0, a SecurityException, a background-start restriction, a package a
+  // battery optimiser force-stopped, or a `.CamService` renamed out from under `PKG` by a
+  // future APK rebuild. Unread, every one of them becomes the same 6-second timeout below
+  // with a camera-permission hint that is wrong in all of them.
+  const svc = await adb([...base, "shell", "am", "start-foreground-service", "-n", `${PKG}/.CamService`])
+  if (/^Error:/m.test(svc.out)) throw new Error(svc.out.trim())
   // The service binds its socket a beat after the process starts; racing ffmpeg against
   // it just fails.
   for (let i = 0; i < tries; i++) {
