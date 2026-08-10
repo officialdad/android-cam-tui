@@ -1,3 +1,4 @@
+import type { StreamConfig } from "./config"
 import { listDevices, type DeviceInfo } from "./scrcpy/devices"
 import { probeSinks, type SinkInfo } from "./scrcpy/probe"
 
@@ -66,6 +67,15 @@ const MIN_SCRCPY: [number, number] = [3, 0]
  * is a hard gate: no scrcpy flag makes an older phone work.
  */
 export const MIN_SDK = 31
+
+/**
+ * The one place the floor is compared. An undefined sdk means the phone never answered
+ * `getprop` — unauthorized, offline, mid-boot — and each of those has its own check, so
+ * it is not treated as old.
+ */
+export function backendFor(sdk?: number): StreamConfig["backend"] {
+  return sdk !== undefined && sdk < MIN_SDK ? "companion" : "scrcpy"
+}
 
 interface Pkgs {
   scrcpy: string[]

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useKeyboard, useTerminalDimensions } from "@opentui/react"
 import type { SelectOption } from "@opentui/core"
 import { buildArgs, loadConfig, ORIENTATIONS, type StreamConfig } from "../config"
-import { checks, probeEnv, MIN_SDK, type Check, type Env } from "../doctor"
+import { backendFor, checks, probeEnv, MIN_SDK, type Check, type Env } from "../doctor"
 import { goUsb, goWireless, type DeviceInfo } from "../scrcpy/devices"
 import { probeCameras, type CameraInfo, type SinkInfo } from "../scrcpy/probe"
 import { Doctor } from "./doctor"
@@ -89,7 +89,12 @@ export const deviceLabel = (d: DeviceInfo) =>
  * name a camera, size or fps that this device does not have — after a device switch
  * it almost always does — so every dependent field is re-validated together.
  */
-export function reconcile(cfg: StreamConfig, cams: CameraInfo[], sinks: SinkInfo[]): StreamConfig {
+export function reconcile(
+  cfg: StreamConfig,
+  cams: CameraInfo[],
+  sinks: SinkInfo[],
+  sdk?: number,
+): StreamConfig {
   const cam = cams.find((c) => c.id === cfg.cameraId) ?? cams[0]
   const zoomOk = cfg.zoom !== null && cam.zoomRange && cfg.zoom >= cam.zoomRange[0] && cfg.zoom <= cam.zoomRange[1]
   const all = camSizes(cam)
@@ -108,6 +113,7 @@ export function reconcile(cfg: StreamConfig, cams: CameraInfo[], sinks: SinkInfo
     highSpeed: stop?.highSpeed ?? false,
     zoom: zoomOk ? cfg.zoom : null,
     sink: sinks.find((s) => s.path === cfg.sink)?.path ?? sinks[0]?.path ?? cfg.sink,
+    backend: backendFor(sdk),
   }
 }
 
@@ -180,7 +186,7 @@ export function Setup(props: {
         return
       }
       setCameras(cams)
-      setConfig(reconcile({ ...cfg, serial }, cams, env.sinks))
+      setConfig(reconcile({ ...cfg, serial }, cams, env.sinks, pick?.sdk))
     } catch (e) {
       setCheckList([...list, blocker("preflight", `preflight failed: ${errMsg(e)}`, [])])
     } finally {
@@ -196,6 +202,7 @@ export function Setup(props: {
     if (!config) return
     setBusy(true)
     setNotice(null)
+    const dev = devices.find((d) => d.serial === serial)
     try {
       const cams = await probesRef.current.getCameras(serial)
       if (cams.length === 0) {
@@ -203,7 +210,7 @@ export function Setup(props: {
         return
       }
       setCameras(cams)
-      setConfig(reconcile({ ...config, serial }, cams, sinks))
+      setConfig(reconcile({ ...config, serial }, cams, sinks, dev?.sdk))
     } catch (e) {
       setNotice(errMsg(e))
     } finally {
@@ -290,6 +297,7 @@ export function Setup(props: {
   const sinkLabel = sinks.find((s) => s.path === config.sink)?.label
   const deviceList = devices.length > 0 ? devices : [{ serial: config.serial ?? "?", model: "", wireless: false, state: "device" }]
   const currentDevice = deviceList.find((d) => d.serial === config.serial)
+  const currentSdk = currentDevice?.sdk
   const outputFocused = OUTPUT_FIELDS.includes(field)
 
   return (
@@ -328,7 +336,7 @@ export function Setup(props: {
             onCaptureChange={(c) => (capturing.current = c)}
             onChange={(v) => {
               const next = cameras.find((c) => c.id === v)!
-              setConfig(reconcile({ ...config, cameraId: next.id, zoom: null }, cameras, sinks))
+              setConfig(reconcile({ ...config, cameraId: next.id, zoom: null }, cameras, sinks, currentSdk))
             }}
           />
         )}
@@ -340,7 +348,7 @@ export function Setup(props: {
             value={config.size}
             onCaptureChange={(c) => (capturing.current = c)}
             // A high-speed-only size cannot keep a normal fps (or the reverse), so re-snap.
-            onChange={(v) => setConfig(reconcile({ ...config, size: v }, cameras, sinks))}
+            onChange={(v) => setConfig(reconcile({ ...config, size: v }, cameras, sinks, currentSdk))}
           />
         )}
         {(wide || outputFocused) && (

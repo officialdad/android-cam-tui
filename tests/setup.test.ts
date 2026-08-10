@@ -91,6 +91,26 @@ describe("reconcile", () => {
   test("preserves the sink when nothing was probed rather than blanking it", () => {
     expect(reconcile({ ...DEFAULT_CONFIG, sink: "/dev/video7" }, cams, []).sink).toBe("/dev/video7")
   })
+
+  // Never read from the saved file: a config outlives the phone it was written for, and
+  // after a device switch it names the wrong backend more often than the right one.
+  test("derives the backend from the phone's api level, overriding the saved value", () => {
+    const saved = { ...DEFAULT_CONFIG, backend: "companion" as const }
+    expect(reconcile(saved, cams, sinks, 34).backend).toBe("scrcpy")
+    expect(reconcile({ ...DEFAULT_CONFIG }, cams, sinks, 29).backend).toBe("companion")
+  })
+
+  test("api 31 exactly is the scrcpy side of the floor", () => {
+    expect(reconcile(DEFAULT_CONFIG, cams, sinks, 31).backend).toBe("scrcpy")
+    expect(reconcile(DEFAULT_CONFIG, cams, sinks, 30).backend).toBe("companion")
+  })
+
+  // An unauthorized or offline phone never answered getprop. Only a phone that provably
+  // reported below the floor is old; everything else has a check of its own.
+  test("an unknown api level stays on scrcpy", () => {
+    expect(reconcile(DEFAULT_CONFIG, cams, sinks).backend).toBe("scrcpy")
+    expect(reconcile(DEFAULT_CONFIG, cams, sinks, undefined).backend).toBe("scrcpy")
+  })
 })
 
 describe("deviceLabel", () => {
