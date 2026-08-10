@@ -141,4 +141,63 @@ describe("StreamRunner", () => {
     const startedEvents = events.filter((e) => e.kind === "started")
     expect(startedEvents.length).toBe(2)
   })
+
+  const COMPANION = { ...DEFAULT_CONFIG, backend: "companion" as const, serial: "R5CT" }
+  const UNIX_READY = `cat ${import.meta.dir}/fixtures/proc-net-unix-ready.txt`
+  const UNIX_COLD = `cat ${import.meta.dir}/fixtures/proc-net-unix-cold.txt`
+
+  test("companion backend preps the phone, then spawns ffmpeg", async () => {
+    const { events, onEvent } = collect()
+    const log = join(mkdtempSync(join(tmpdir(), "adblog-")), "calls")
+    const r = new StreamRunner({
+      adbPath: fakeScrcpy(`echo "$@" >> ${log}\ncase "$*" in *"/proc/net/unix"*) ${UNIX_READY};; esac`),
+      ffmpegPath: fakeScrcpy("sleep 600"),
+      restartDelayMs: 50,
+      onEvent,
+    })
+    await r.start(COMPANION)
+    await waitFor(() => events.some((e) => e.kind === "started"))
+    await r.stop()
+    const calls = await Bun.file(log).text()
+    expect(calls).toContain("forward tcp:27183 localabstract:android-cam")
+    expect(calls).toContain("am start-foreground-service")
+    expect(r.state).toBe("stopped")
+  })
+
+  // The prep is three adb round-trips of awaits. Without an epoch re-check after them, a
+  // stop() landing mid-prep leaves ffmpeg spawned and holding the sink.
+  test("stop() during the prep never spawns ffmpeg", async () => {
+    const { events, onEvent } = collect()
+    const r = new StreamRunner({
+      adbPath: fakeScrcpy(`case "$*" in *"/proc/net/unix"*) ${UNIX_COLD};; esac`),
+      ffmpegPath: fakeScrcpy("sleep 600"),
+      restartDelayMs: 50,
+      onEvent,
+    })
+    void r.start(COMPANION)
+    await sleep(150) // mid socket-poll
+    await r.stop()
+    await sleep(600)
+    expect(events.filter((e) => e.kind === "started").length).toBe(0)
+    expect(r.state).toBe("stopped")
+  })
+
+  // A phone still booting is exactly what retries are for, so a prep failure has to land in
+  // the same backoff path as a stream that died — not as an unhandled rejection.
+  test("a prep failure reports the reason and retries", async () => {
+    const { events, onEvent } = collect()
+    const r = new StreamRunner({
+      adbPath: fakeScrcpy(`case "$*" in *forward*) echo "error: device offline" >&2; exit 1;; esac`),
+      ffmpegPath: fakeScrcpy("sleep 600"),
+      restartDelayMs: 20,
+      maxAttempts: 1,
+      onEvent,
+    })
+    await r.start(COMPANION)
+    await waitFor(() => events.some((e) => e.kind === "gave-up"))
+    await r.stop()
+    const exited = events.find((e) => e.kind === "exited") as Extract<StreamEvent, { kind: "exited" }>
+    expect(exited.reason).toContain("device offline")
+    expect(events.map((e) => e.kind)).toContain("restarting")
+  })
 })
