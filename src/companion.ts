@@ -1,4 +1,9 @@
+// Built from github.com/officialdad/android-cam at ccae2f9 ("feat: companion APK camera
+// backend"). sha256 90a54188d990cba6e84e1917afabfa92dc1e9b473603397f5f60fc83ddb85edc,
+// 12691 bytes. The doctor tells users to install this on their phone, so a rebuild
+// updates both lines.
 import apk from "./android-cam.apk" with { type: "file" }
+import { homedir } from "node:os"
 import type { CameraInfo } from "./scrcpy/probe"
 import { adb } from "./scrcpy/devices"
 
@@ -82,7 +87,9 @@ export function ffmpegArgs(port: number, sink: string): string[] {
  */
 export const APK_CACHE = "~/.cache/android-cam-tui/android-cam.apk"
 
-const expand = (p: string) => p.replace(/^~/, process.env.HOME ?? "~")
+// homedir() rather than a literal `~`: Bun.write would take that at its word and create a
+// directory called `~` in the cwd.
+const expand = (p: string) => p.replace(/^~/, process.env.HOME ?? homedir())
 
 /**
  * The imported path addresses Bun's embedded filesystem inside a compiled binary, which
@@ -134,4 +141,15 @@ export async function prepPhone(serial: string | null, adbPath = "adb", tries = 
   throw new Error(
     `Android Cam never listened — grant it the camera: adb shell pm grant ${PKG} android.permission.CAMERA`,
   )
+}
+
+/**
+ * The forward lives in the adb server, which outlives this process, so left behind it
+ * leaves 127.0.0.1:27183 open — anything that connects to it makes the phone open its
+ * camera and stream. Best-effort and never throws: `stop()` also runs on teardown paths
+ * where the phone is already gone.
+ */
+export async function unforward(serial: string | null, adbPath = "adb"): Promise<void> {
+  const base = serial ? [adbPath, "-s", serial] : [adbPath]
+  await adb([...base, "forward", "--remove", `tcp:${PORT}`]).catch(() => undefined)
 }

@@ -1,4 +1,4 @@
-import { ffmpegArgs, PORT, prepPhone } from "../companion"
+import { ffmpegArgs, PORT, prepPhone, unforward } from "../companion"
 import { buildArgs, type StreamConfig } from "../config"
 
 export type StreamEvent =
@@ -97,6 +97,11 @@ export class StreamRunner {
       await this.proc.exited
       this.proc = null
     }
+    // Killing ffmpeg does not close the forward — that lives in the adb server and would
+    // outlive the TUI, leaving a port anything could connect to to make the phone stream.
+    // `unforward` swallows its own failures, so this cannot make stop() unreliable, and it
+    // has no place in the synchronous kill() hook, which cannot await.
+    if (this.config?.backend === "companion") await unforward(this.config.serial, this.adbPath)
   }
 
   /** `buildArgs` stays scrcpy-only; the companion path is a different program entirely. */

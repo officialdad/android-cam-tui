@@ -164,6 +164,9 @@ describe("StreamRunner", () => {
     const calls = await Bun.file(log).text()
     expect(calls).toContain("forward tcp:27183 localabstract:android-cam")
     expect(calls).toContain("am start-foreground-service")
+    // The forward lives in the adb server and outlives the TUI: left behind, anything that
+    // connects to 127.0.0.1:27183 makes the phone open its camera.
+    expect(calls).toContain("forward --remove tcp:27183")
     // Proves command() picked the ffmpeg/companion args, not the scrcpy pair — a
     // command() bug that returned buildArgs() here would still emit "started".
     const ffmpegCalls = await Bun.file(ffmpegLog).text()
