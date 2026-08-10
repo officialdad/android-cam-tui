@@ -108,12 +108,16 @@ they warn when another phone works and block when none does. `stop()` removes th
 `adb forward`: it lives in the adb server and outlives the TUI, and anything that
 connects to that port makes the phone open its camera.
 
-The 1280x720@30 ceiling is scheduled, not permanent. `CamService.java` compiles
-`WIDTH`/`HEIGHT`/`FPS` in, and the host's only channel to it is
-`am start-foreground-service` plus a socket that starts carrying H.264 immediately —
-there is no request frame, so a size picker would list options the stream ignores.
-Lifting it means a connect handshake in the APK, which lives in the separate
-`android-cam` repo and is planned as its own cycle.
+Size and bitrate are requests, not guarantees: `serviceExtras()` rides them on the
+start intent (`--ei width … height … fps … bitrate …`) and the APK (source in the
+separate `android-cam` repo, `3a5cbd8`) clamps to what the camera offers. The socket
+stays pure H.264 — its client is ffmpeg, which can neither send a config frame nor
+tolerate a reply — so the host never learns what a clamp chose. Sizes survive that
+(ffmpeg reads the real size off the SPS); fps does not, because `-r` must match the
+actual stream rate, which is why `COMPANION_CAM.fps` stays a single stop. Old APK +
+new host: extras ignored, defaults stream. New APK + old host: no extras, defaults
+stream. A rebuilt APK updates `src/android-cam.apk` and the sha256 comment in
+`src/companion.ts`.
 
 ### StreamRunner epochs
 

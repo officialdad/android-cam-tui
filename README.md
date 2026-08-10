@@ -59,9 +59,11 @@ they are not raised at all: the service is launched with
 `am start-foreground-service`, which does not exist there, so that phone is a hard
 block with no install that fixes it.
 
-The stream is fixed at 1280x720@30 with no zoom, torch or rotation — the app
-compiles those in and has no channel back to the host to change them. That
-ceiling is scheduled to lift, not permanent.
+Size and bitrate are picked in setup and ride the service's start intent; the
+phone clamps them to the nearest thing its camera supports and streams that.
+The rate is fixed at 30 fps, and there is no zoom, torch or rotation — the
+stream socket has no reply channel, so the host cannot learn what a clamped
+value became, and a wrong rate corrupts the timing host-side.
 
 ## Install
 

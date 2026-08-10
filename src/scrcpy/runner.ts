@@ -1,4 +1,4 @@
-import { ffmpegArgs, PORT, prepPhone, unforward } from "../companion"
+import { ffmpegArgs, PORT, prepPhone, serviceExtras, unforward } from "../companion"
 import { buildArgs, type StreamConfig } from "../config"
 
 export type StreamEvent =
@@ -107,7 +107,7 @@ export class StreamRunner {
   /** `buildArgs` stays scrcpy-only; the companion path is a different program entirely. */
   private command(): string[] {
     return this.config.backend === "companion"
-      ? [this.ffmpegPath, ...ffmpegArgs(PORT, this.config.sink)]
+      ? [this.ffmpegPath, ...ffmpegArgs(PORT, this.config.sink, this.config.fps)]
       : [this.scrcpyPath, ...buildArgs(this.config)]
   }
 
@@ -126,7 +126,7 @@ export class StreamRunner {
     live.add(this)
     try {
       if (this.config.backend === "companion") {
-        await prepPhone(this.config.serial, this.adbPath)
+        await prepPhone(this.config.serial, this.adbPath, serviceExtras(this.config))
         if (this.epoch !== myEpoch) return
       }
       // Inside the try because `Bun.spawn` throws *synchronously* on a missing executable,

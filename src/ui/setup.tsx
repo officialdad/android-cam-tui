@@ -129,9 +129,9 @@ export function reconcile(
   }
 }
 
-/** Read off COMPANION_CAM, not retyped: the control-channel cycle makes it a probe result. */
+/** Read off COMPANION_CAM, not retyped: sizes are requests the phone clamps, not a probe. */
 export const companionCeiling = () =>
-  `companion backend — ${COMPANION_CAM.maxSize}@${COMPANION_CAM.fps[0]} fixed, no zoom or torch`
+  `companion backend — ${COMPANION_CAM.fps[0]}fps, phone clamps size, no zoom or torch`
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -450,7 +450,7 @@ export function Setup(props: {
       {companion && <text fg="yellow">{companionCeiling()}</text>}
       <text fg="#888">
         {companion
-          ? `ffmpeg ${ffmpegArgs(PORT, config.sink).join(" ")}`
+          ? `ffmpeg ${ffmpegArgs(PORT, config.sink, config.fps).join(" ")}`
           : `scrcpy ${buildArgs(config).join(" ")}`}
       </text>
       <text fg="cyan">↹ next · ⇧↹ prev · 1-3 jump · / filter · ↑↓ pick · ←→ adjust · w usb/wifi · ⏎ start</text>

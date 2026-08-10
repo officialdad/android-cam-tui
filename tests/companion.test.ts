@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { COMPANION_CAM, ffmpegArgs, parseCompanionState, socketReady } from "../src/companion"
+import { COMPANION_CAM, ffmpegArgs, parseBitrate, parseCompanionState, serviceExtras, socketReady } from "../src/companion"
 
 const fixture = (name: string) => Bun.file(`${import.meta.dir}/fixtures/${name}`).text()
 
@@ -55,6 +55,11 @@ describe("ffmpegArgs", () => {
     expect(args[args.indexOf("-r") + 1]).toBe("30")
   })
 
+  test("-r follows the requested fps", () => {
+    const args = ffmpegArgs(27183, "/dev/video3", 30)
+    expect(args[args.indexOf("-r") + 1]).toBe("30")
+  })
+
   test("reads the forwarded port on localhost and writes the sink last", () => {
     const args = ffmpegArgs(27183, "/dev/video3")
     expect(args[args.indexOf("-i") + 1]).toBe("tcp://127.0.0.1:27183")
@@ -64,13 +69,36 @@ describe("ffmpegArgs", () => {
 })
 
 describe("COMPANION_CAM", () => {
-  // The APK compiles these in and has no control channel, so the setup screen must offer
-  // exactly one of each rather than a list the phone cannot honour.
-  test("offers exactly one camera, size and rate", () => {
-    expect(COMPANION_CAM.sizes).toEqual(["1280x720"])
+  // Sizes are requests the phone clamps; fps stays a single stop because ffmpeg's `-r`
+  // must match the actual stream rate and there is no reply channel to learn a clamp.
+  test("offers sizes to request but exactly one rate", () => {
+    expect(COMPANION_CAM.sizes).toEqual(["1920x1080", "1280x720", "640x480"])
     expect(COMPANION_CAM.fps).toEqual([30])
     expect(COMPANION_CAM.highSpeed).toEqual({})
     expect(COMPANION_CAM.zoomRange).toBeNull()
+  })
+})
+
+describe("parseBitrate", () => {
+  test("reads scrcpy-style suffixes into bits/s", () => {
+    expect(parseBitrate("16M")).toBe(16_000_000)
+    expect(parseBitrate("8000K")).toBe(8_000_000)
+    expect(parseBitrate("8000000")).toBe(8_000_000)
+  })
+
+  // 0 would mean "keep the current config" to the service, not "use the default".
+  test("falls back to the APK default rather than 0 on garbage", () => {
+    expect(parseBitrate("fast")).toBe(8_000_000)
+    expect(parseBitrate("")).toBe(8_000_000)
+  })
+})
+
+describe("serviceExtras", () => {
+  test("splits the size and converts the bitrate for the intent", () => {
+    expect(serviceExtras({ size: "1920x1080", fps: 30, bitrate: "8M" })).toEqual([
+      ...["--ei", "width", "1920", "--ei", "height", "1080"],
+      ...["--ei", "fps", "30", "--ei", "bitrate", "8000000"],
+    ])
   })
 })
 
@@ -112,10 +140,12 @@ describe("prepPhone", () => {
   test("forwards the port and starts the service before the socket poll", async () => {
     const log = join(mkdtempSync(join(tmpdir(), "adblog-")), "calls")
     const bin = fakeAdb(`echo "$@" >> ${log}\ncase "$*" in *"/proc/net/unix"*) ${UNIX_READY};; esac`)
-    await prepPhone("R5CT", bin)
+    await prepPhone("R5CT", bin, serviceExtras({ size: "1920x1080", fps: 30, bitrate: "8M" }))
     const calls = await Bun.file(log).text()
     expect(calls).toContain("-s R5CT forward tcp:27183 localabstract:android-cam")
-    expect(calls).toContain("-s R5CT shell am start-foreground-service -n com.officialdad.androidcam/.CamService")
+    expect(calls).toContain(
+      "-s R5CT shell am start-foreground-service -n com.officialdad.androidcam/.CamService --ei width 1920 --ei height 1080 --ei fps 30 --ei bitrate 8000000",
+    )
     // No activity is ever started: waking a locked phone starts face unlock, which opens a
     // camera of its own and gets our own open rejected.
     expect(calls).not.toContain("am start -n")
@@ -123,7 +153,7 @@ describe("prepPhone", () => {
 
   test("throws with the permission hint when the service never listens", async () => {
     const bin = fakeAdb(`case "$*" in *"/proc/net/unix"*) ${UNIX_COLD};; esac`)
-    expect(prepPhone("R5CT", bin, 2)).rejects.toThrow(/pm grant/)
+    expect(prepPhone("R5CT", bin, [], 2)).rejects.toThrow(/pm grant/)
   })
 
   // `am` reports its real failures on stdout with exit code 0 — an Android below 8.0 has no
