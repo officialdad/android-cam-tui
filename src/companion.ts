@@ -1,6 +1,6 @@
-// Built from github.com/officialdad/android-cam at 3a5cbd8 ("feat: negotiate stream
-// size/fps/bitrate via start-intent extras"). sha256
-// 445c17dca5c2a68f2012aad4945b5e1e6b8edd3eb5d9fb6c7aa7b0758b863850, 16787 bytes. The
+// Built from github.com/officialdad/android-cam at 6896011 ("feat: digital zoom via a
+// `zoom` intent extra"). sha256
+// b64ff5f1a15824028289daaa4f8ea7d6b18d9c8420ad49c437d066d697370c95, 16787 bytes. The
 // doctor tells users to install this on their phone, so a rebuild updates both lines.
 import apk from "./android-cam.apk" with { type: "file" }
 import { homedir } from "node:os"
@@ -29,7 +29,9 @@ export const COMPANION_CAM: CameraInfo = {
   facing: "back",
   maxSize: "1920x1080",
   fps: [30],
-  zoomRange: null,
+  // Optimistic, like the sizes: the camera's real max digital zoom is not probeable, but
+  // the service clamps to SCALER_AVAILABLE_MAX_DIGITAL_ZOOM, so overshoot just pins there.
+  zoomRange: [1, 4],
   sizes: ["1920x1080", "1280x720", "640x480"],
   highSpeed: {},
 }
@@ -73,22 +75,66 @@ export function parseBitrate(b: string): number {
  * config frame nor tolerate a reply ahead of the Annex-B. The service clamps these to
  * what the camera offers and applies them at the next client connect.
  */
-export function serviceExtras(c: Pick<StreamConfig, "size" | "fps" | "bitrate">): string[] {
+export function serviceExtras(c: Pick<StreamConfig, "size" | "fps" | "bitrate" | "zoom">): string[] {
   const [width, height] = c.size.split("x")
   return [
     ...["--ei", "width", width, "--ei", "height", height],
     ...["--ei", "fps", String(c.fps)],
     ...["--ei", "bitrate", String(parseBitrate(c.bitrate))],
+    // Always sent, even for "auto": a re-run `am` keeps absent extras at their *previous*
+    // values, so dropping the extra after zooming would leave the phone zoomed forever.
+    // The service reads ≤100 as off, which is what auto means here (no digital crop).
+    ...["--ei", "zoom", String(c.zoom === null ? 100 : Math.round(c.zoom * 100))],
   ]
 }
 
 /**
- * run.sh's invocation, verbatim. The `-r` before `-i` is load-bearing: Annex-B carries no
- * timestamps, so without it ffmpeg guesses a 1200k tbr for the input and drops ~98% of the
- * frames converting down. Do not move it to the output side. `fps` must match what the
- * phone actually streams — see the COMPANION_CAM note on why it is not user-selectable.
+ * Rotation happens here, not on the phone: raw Annex-B has no rotation metadata and
+ * Camera2 cannot rotate buffers into the encoder surface, so the phone side would need an
+ * OpenGL pass. A transpose is a lossless pixel remap — do it where it is nearly free.
+ * Numbers are clockwise, matching scrcpy's --capture-orientation; flip is horizontal,
+ * applied before the rotation like scrcpy's flipNNN.
  */
-export function ffmpegArgs(port: number, sink: string, fps: number = COMPANION_CAM.fps[0]): string[] {
+const ROTATE_FILTER: Record<StreamConfig["orientation"], string> = {
+  "0": "",
+  "90": "transpose=1",
+  "180": "transpose=1,transpose=1",
+  "270": "transpose=2",
+  flip0: "hflip",
+  flip90: "hflip,transpose=1",
+  flip180: "vflip", // hflip + 180° collapses to a vertical flip
+  flip270: "hflip,transpose=2",
+}
+
+/**
+ * Centered crop to the requested aspect. Expression-based on iw/ih rather than computed
+ * from the config: the phone clamps the requested size to what its camera offers and
+ * there is no reply channel, so the config's size is not what necessarily arrives —
+ * ffmpeg's own view of the decoded stream is. Quoted so the commas inside min() survive
+ * the filtergraph parser (the args go through Bun.spawn, no shell to strip them).
+ */
+const ASPECT_FILTER: Record<StreamConfig["aspect"], string> = {
+  native: "",
+  "16:9": "crop=w='min(iw,ih*16/9)':h='min(ih,iw*9/16)'",
+  "4:3": "crop=w='min(iw,ih*4/3)':h='min(ih,iw*3/4)'",
+  "1:1": "crop=w='min(iw,ih)':h='min(iw,ih)'",
+}
+
+/**
+ * run.sh's invocation plus the host-side filters. The `-r` before `-i` is load-bearing:
+ * Annex-B carries no timestamps, so without it ffmpeg guesses a 1200k tbr for the input
+ * and drops ~98% of the frames converting down. Do not move it to the output side. `fps`
+ * must match what the phone actually streams — see the COMPANION_CAM note on why it is
+ * not user-selectable. Filter order: rotate first so the aspect crop sees the final
+ * orientation's width/height.
+ */
+export function ffmpegArgs(
+  port: number,
+  c: Pick<StreamConfig, "sink" | "fps" | "orientation" | "aspect">,
+): string[] {
+  const vf = [ROTATE_FILTER[c.orientation], ASPECT_FILTER[c.aspect], "format=yuv420p"]
+    .filter(Boolean)
+    .join(",")
   return [
     "-hide_banner",
     "-loglevel",
@@ -98,7 +144,7 @@ export function ffmpegArgs(port: number, sink: string, fps: number = COMPANION_C
     "-flags",
     "low_delay",
     "-r",
-    String(fps),
+    String(c.fps),
     "-f",
     "h264",
     "-i",
@@ -106,10 +152,10 @@ export function ffmpegArgs(port: number, sink: string, fps: number = COMPANION_C
     "-fps_mode",
     "passthrough",
     "-vf",
-    "format=yuv420p",
+    vf,
     "-f",
     "v4l2",
-    sink,
+    c.sink,
   ]
 }
 

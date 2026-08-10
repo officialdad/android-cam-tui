@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useKeyboard, useTerminalDimensions } from "@opentui/react"
 import type { SelectOption } from "@opentui/core"
-import { buildArgs, loadConfig, ORIENTATIONS, type StreamConfig } from "../config"
+import { ASPECTS, buildArgs, loadConfig, ORIENTATIONS, type StreamConfig } from "../config"
 import { backendFor, checks, probeEnv, MIN_SDK, type Check, type Env } from "../doctor"
 import { COMPANION_CAM, ffmpegArgs, PORT } from "../companion"
 import { goUsb, goWireless, type DeviceInfo } from "../scrcpy/devices"
@@ -10,19 +10,21 @@ import { Doctor } from "./doctor"
 import { annotateSizes } from "./sizes"
 import { FilteredSelect, Stepper } from "./widgets"
 
-const FIELDS = ["device", "camera", "size", "fps", "zoom", "bitrate", "orientation", "buffer", "sink"] as const
+const FIELDS = ["device", "camera", "size", "fps", "zoom", "bitrate", "orientation", "aspect", "buffer", "sink"] as const
 type Field = (typeof FIELDS)[number]
 // The "1 camera" and "2 resolution" panels own these; whatever fieldsFor(backend) leaves
 // is what belongs in the "3 output" box, so this is the only place that split is named.
 const PANEL_FIELDS: Field[] = ["device", "camera", "size"]
 
 /**
- * The companion APK compiles camera, size, fps and bitrate in and has no control channel,
- * so tab must not land on a stepper that cannot do anything. Camera and size stay: they are
- * single-option and showing them is how the ceiling is visible.
+ * Per backend, only steppers that can do something. Companion: no fps (ffmpeg's -r must
+ * match the actual stream rate — see COMPANION_CAM) and no v4l2 buffer (that is a scrcpy
+ * flag). Aspect is the reverse: an ffmpeg crop, so the scrcpy path has no stage for it.
  */
 export function fieldsFor(backend: StreamConfig["backend"]): Field[] {
-  return backend === "companion" ? ["device", "camera", "size", "sink"] : [...FIELDS]
+  return backend === "companion"
+    ? ["device", "camera", "size", "zoom", "bitrate", "orientation", "aspect", "sink"]
+    : FIELDS.filter((f) => f !== "aspect")
 }
 
 const BITRATES = ["4M", "8M", "16M", "24M", "32M"]
@@ -131,7 +133,7 @@ export function reconcile(
 
 /** Read off COMPANION_CAM, not retyped: sizes are requests the phone clamps, not a probe. */
 export const companionCeiling = () =>
-  `companion backend — ${COMPANION_CAM.fps[0]}fps, phone clamps size, no zoom or torch`
+  `companion backend — ${COMPANION_CAM.fps[0]}fps, phone clamps size and zoom, no torch`
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -392,48 +394,58 @@ export function Setup(props: {
             }}
           >
             {!companion && (
-              <>
-                <Stepper
-                  label="fps"
-                  focused={field === "fps"}
-                  options={stops.map(fpsLabel)}
-                  index={Math.max(
-                    0,
-                    stops.findIndex((s) => s.fps === config.fps && s.highSpeed === config.highSpeed),
-                  )}
-                  onChange={(i) => setConfig({ ...config, fps: stops[i].fps, highSpeed: stops[i].highSpeed })}
-                />
-                <Stepper
-                  label="zoom"
-                  bar
-                  focused={field === "zoom"}
-                  options={zooms.map(zoomLabel)}
-                  index={Math.max(0, zooms.indexOf(config.zoom))}
-                  onChange={(i) => setConfig({ ...config, zoom: zooms[i] })}
-                />
-                <Stepper
-                  label="bitrate"
-                  focused={field === "bitrate"}
-                  options={bitrates}
-                  index={Math.max(0, bitrates.indexOf(config.bitrate))}
-                  onChange={(i) => setConfig({ ...config, bitrate: bitrates[i] })}
-                />
-                <Stepper
-                  label="rotate"
-                  compact
-                  focused={field === "orientation"}
-                  options={ORIENTATIONS.map((o) => ORIENT_LABELS[o])}
-                  index={Math.max(0, ORIENTATIONS.indexOf(config.orientation))}
-                  onChange={(i) => setConfig({ ...config, orientation: ORIENTATIONS[i] })}
-                />
-                <Stepper
-                  label="buffer"
-                  focused={field === "buffer"}
-                  options={BUFFERS.map((b) => (b === 0 ? "off" : String(b)))}
-                  index={Math.max(0, BUFFERS.indexOf(config.v4l2Buffer))}
-                  onChange={(i) => setConfig({ ...config, v4l2Buffer: BUFFERS[i] })}
-                />
-              </>
+              <Stepper
+                label="fps"
+                focused={field === "fps"}
+                options={stops.map(fpsLabel)}
+                index={Math.max(
+                  0,
+                  stops.findIndex((s) => s.fps === config.fps && s.highSpeed === config.highSpeed),
+                )}
+                onChange={(i) => setConfig({ ...config, fps: stops[i].fps, highSpeed: stops[i].highSpeed })}
+              />
+            )}
+            <Stepper
+              label="zoom"
+              bar
+              focused={field === "zoom"}
+              options={zooms.map(zoomLabel)}
+              index={Math.max(0, zooms.indexOf(config.zoom))}
+              onChange={(i) => setConfig({ ...config, zoom: zooms[i] })}
+            />
+            <Stepper
+              label="bitrate"
+              focused={field === "bitrate"}
+              options={bitrates}
+              index={Math.max(0, bitrates.indexOf(config.bitrate))}
+              onChange={(i) => setConfig({ ...config, bitrate: bitrates[i] })}
+            />
+            <Stepper
+              label="rotate"
+              compact
+              focused={field === "orientation"}
+              options={ORIENTATIONS.map((o) => ORIENT_LABELS[o])}
+              index={Math.max(0, ORIENTATIONS.indexOf(config.orientation))}
+              onChange={(i) => setConfig({ ...config, orientation: ORIENTATIONS[i] })}
+            />
+            {companion && (
+              <Stepper
+                label="aspect"
+                compact
+                focused={field === "aspect"}
+                options={[...ASPECTS]}
+                index={Math.max(0, ASPECTS.indexOf(config.aspect))}
+                onChange={(i) => setConfig({ ...config, aspect: ASPECTS[i] })}
+              />
+            )}
+            {!companion && (
+              <Stepper
+                label="buffer"
+                focused={field === "buffer"}
+                options={BUFFERS.map((b) => (b === 0 ? "off" : String(b)))}
+                index={Math.max(0, BUFFERS.indexOf(config.v4l2Buffer))}
+                onChange={(i) => setConfig({ ...config, v4l2Buffer: BUFFERS[i] })}
+              />
             )}
             <Stepper
               label="sink"
@@ -450,7 +462,7 @@ export function Setup(props: {
       {companion && <text fg="yellow">{companionCeiling()}</text>}
       <text fg="#888">
         {companion
-          ? `ffmpeg ${ffmpegArgs(PORT, config.sink, config.fps).join(" ")}`
+          ? `ffmpeg ${ffmpegArgs(PORT, config).join(" ")}`
           : `scrcpy ${buildArgs(config).join(" ")}`}
       </text>
       <text fg="cyan">↹ next · ⇧↹ prev · 1-3 jump · / filter · ↑↓ pick · ←→ adjust · w usb/wifi · ⏎ start</text>

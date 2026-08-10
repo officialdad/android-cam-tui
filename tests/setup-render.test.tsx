@@ -295,15 +295,16 @@ describe("Setup → companion backend", () => {
     expect(frame).toContain("27183")
     expect(frame).not.toContain("scrcpy --video-source=camera")
 
-    // The guarded steppers never render on this path. "bitrate"/"rotate" are stepper labels
-    // used nowhere else on this screen. "buffer" also shows up inside the ffmpeg preview's
-    // "-fflags nobuffer" flag, so its stepper is checked by its padded label instead; "zoom"
-    // appears in the ceiling sentence above, so it is ruled out by its bar glyph, which
-    // nothing else on this screen draws.
-    expect(frame).not.toContain("bitrate")
-    expect(frame).not.toContain("rotate")
+    // Zoom, bitrate, rotate and aspect all work on this path now (intent extras and ffmpeg
+    // filters), so their steppers render. fps and buffer stay guarded: "fps" appears in the
+    // ceiling sentence, so its stepper is ruled out by its padded label, and "buffer" also
+    // shows up inside the ffmpeg preview's "-fflags nobuffer" flag, likewise.
+    expect(frame).toContain("bitrate")
+    expect(frame).toContain("rotate")
+    expect(frame).toContain("aspect")
+    expect(frame).toContain("├") // the zoom stepper's bar track
+    expect(frame).not.toContain("fps     ") // the fps stepper's 8-wide padded label
     expect(frame).not.toContain("buffer  ‹") // the buffer stepper's padded label + selection
-    expect(frame).not.toContain("├") // the zoom stepper's bar track
 
     expect(getCameras).not.toHaveBeenCalled()
   })

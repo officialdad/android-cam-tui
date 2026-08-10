@@ -43,28 +43,51 @@ describe("socketReady", () => {
   })
 })
 
+const FF = { sink: "/dev/video3", fps: 30, orientation: "0" as const, aspect: "native" as const }
+
 describe("ffmpegArgs", () => {
   test("puts -r before -i", () => {
     // Annex-B carries no timestamps. With -r only on the output, ffmpeg guesses a 1200k
     // tbr for the input and drops ~98% of the frames converting down to 30. This ordering
     // is the difference between 30 fps and a slideshow, and nothing else would catch a
     // reorder during a refactor.
-    const args = ffmpegArgs(27183, "/dev/video3")
+    const args = ffmpegArgs(27183, FF)
     expect(args.indexOf("-r")).toBeGreaterThan(-1)
     expect(args.indexOf("-r")).toBeLessThan(args.indexOf("-i"))
     expect(args[args.indexOf("-r") + 1]).toBe("30")
   })
 
-  test("-r follows the requested fps", () => {
-    const args = ffmpegArgs(27183, "/dev/video3", 30)
-    expect(args[args.indexOf("-r") + 1]).toBe("30")
-  })
-
   test("reads the forwarded port on localhost and writes the sink last", () => {
-    const args = ffmpegArgs(27183, "/dev/video3")
+    const args = ffmpegArgs(27183, FF)
     expect(args[args.indexOf("-i") + 1]).toBe("tcp://127.0.0.1:27183")
     expect(args.at(-1)).toBe("/dev/video3")
     expect(args).toContain("passthrough")
+  })
+
+  const vf = (args: string[]) => args[args.indexOf("-vf") + 1]
+
+  test("no rotation and native aspect leave only the format filter", () => {
+    expect(vf(ffmpegArgs(27183, FF))).toBe("format=yuv420p")
+  })
+
+  // Rotation is host-side: raw Annex-B has no rotation metadata to carry a phone-side
+  // one, and the numbers are clockwise to match scrcpy's --capture-orientation.
+  test("rotation prepends a transpose, before the aspect crop", () => {
+    expect(vf(ffmpegArgs(27183, { ...FF, orientation: "90" }))).toBe("transpose=1,format=yuv420p")
+    expect(vf(ffmpegArgs(27183, { ...FF, orientation: "270" }))).toBe("transpose=2,format=yuv420p")
+    expect(vf(ffmpegArgs(27183, { ...FF, orientation: "flip0" }))).toBe("hflip,format=yuv420p")
+    const both = vf(ffmpegArgs(27183, { ...FF, orientation: "90", aspect: "1:1" }))
+    expect(both.indexOf("transpose")).toBeLessThan(both.indexOf("crop"))
+  })
+
+  // Expression-based on iw/ih, not the config size: the phone clamps the requested size
+  // and there is no reply channel, so only ffmpeg knows what actually arrived.
+  test("aspect crops center on the decoded stream's own dimensions", () => {
+    expect(vf(ffmpegArgs(27183, { ...FF, aspect: "1:1" }))).toBe(
+      "crop=w='min(iw,ih)':h='min(iw,ih)',format=yuv420p",
+    )
+    expect(vf(ffmpegArgs(27183, { ...FF, aspect: "4:3" }))).toContain("ih*4/3")
+    expect(vf(ffmpegArgs(27183, { ...FF, aspect: "16:9" }))).toContain("ih*16/9")
   })
 })
 
@@ -75,7 +98,8 @@ describe("COMPANION_CAM", () => {
     expect(COMPANION_CAM.sizes).toEqual(["1920x1080", "1280x720", "640x480"])
     expect(COMPANION_CAM.fps).toEqual([30])
     expect(COMPANION_CAM.highSpeed).toEqual({})
-    expect(COMPANION_CAM.zoomRange).toBeNull()
+    // Optimistic range: the phone clamps to its real max digital zoom, overshoot pins there.
+    expect(COMPANION_CAM.zoomRange).toEqual([1, 4])
   })
 })
 
@@ -94,11 +118,19 @@ describe("parseBitrate", () => {
 })
 
 describe("serviceExtras", () => {
-  test("splits the size and converts the bitrate for the intent", () => {
-    expect(serviceExtras({ size: "1920x1080", fps: 30, bitrate: "8M" })).toEqual([
+  test("splits the size and converts the bitrate and zoom for the intent", () => {
+    expect(serviceExtras({ size: "1920x1080", fps: 30, bitrate: "8M", zoom: 1.5 })).toEqual([
       ...["--ei", "width", "1920", "--ei", "height", "1080"],
       ...["--ei", "fps", "30", "--ei", "bitrate", "8000000"],
+      ...["--ei", "zoom", "150"],
     ])
+  })
+
+  // A re-run `am` keeps absent extras at their previous values, so "auto" must be an
+  // explicit 100 (= off to the service) — dropping the extra would leave the phone zoomed.
+  test("auto zoom is sent as an explicit 100, never omitted", () => {
+    const extras = serviceExtras({ size: "1280x720", fps: 30, bitrate: "8M", zoom: null })
+    expect(extras.slice(extras.indexOf("zoom"))).toEqual(["zoom", "100"])
   })
 })
 
@@ -140,11 +172,11 @@ describe("prepPhone", () => {
   test("forwards the port and starts the service before the socket poll", async () => {
     const log = join(mkdtempSync(join(tmpdir(), "adblog-")), "calls")
     const bin = fakeAdb(`echo "$@" >> ${log}\ncase "$*" in *"/proc/net/unix"*) ${UNIX_READY};; esac`)
-    await prepPhone("R5CT", bin, serviceExtras({ size: "1920x1080", fps: 30, bitrate: "8M" }))
+    await prepPhone("R5CT", bin, serviceExtras({ size: "1920x1080", fps: 30, bitrate: "8M", zoom: null }))
     const calls = await Bun.file(log).text()
     expect(calls).toContain("-s R5CT forward tcp:27183 localabstract:android-cam")
     expect(calls).toContain(
-      "-s R5CT shell am start-foreground-service -n com.officialdad.androidcam/.CamService --ei width 1920 --ei height 1080 --ei fps 30 --ei bitrate 8000000",
+      "-s R5CT shell am start-foreground-service -n com.officialdad.androidcam/.CamService --ei width 1920 --ei height 1080 --ei fps 30 --ei bitrate 8000000 --ei zoom 100",
     )
     // No activity is ever started: waking a locked phone starts face unlock, which opens a
     // camera of its own and gets our own open rejected.

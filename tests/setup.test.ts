@@ -164,16 +164,28 @@ describe("zoomStops", () => {
 })
 
 describe("fieldsFor", () => {
-  // Bitrate, zoom, rotate and buffer are all scrcpy flags. The APK compiles its settings in
-  // and has no control channel, so a stepper for them would silently do nothing — worse
-  // than not being there.
+  // A stepper that can do nothing is worse than not being there. Companion: fps (ffmpeg's
+  // -r must match the actual stream rate) and buffer (a scrcpy flag) go; zoom/bitrate ride
+  // the intent extras and rotate/aspect are ffmpeg filters, so they stay. scrcpy: aspect
+  // goes — that path has no crop stage.
   test("the companion path drops every field it cannot honour", () => {
-    expect(fieldsFor("companion")).toEqual(["device", "camera", "size", "sink"])
+    expect(fieldsFor("companion")).toEqual([
+      "device",
+      "camera",
+      "size",
+      "zoom",
+      "bitrate",
+      "orientation",
+      "aspect",
+      "sink",
+    ])
   })
 
-  test("the scrcpy path keeps all of them", () => {
+  test("the scrcpy path keeps everything but aspect", () => {
     expect(fieldsFor("scrcpy")).toContain("bitrate")
     expect(fieldsFor("scrcpy")).toContain("zoom")
+    expect(fieldsFor("scrcpy")).toContain("buffer")
+    expect(fieldsFor("scrcpy")).not.toContain("aspect")
   })
 })
 

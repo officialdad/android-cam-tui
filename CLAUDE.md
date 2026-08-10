@@ -108,16 +108,20 @@ they warn when another phone works and block when none does. `stop()` removes th
 `adb forward`: it lives in the adb server and outlives the TUI, and anything that
 connects to that port makes the phone open its camera.
 
-Size and bitrate are requests, not guarantees: `serviceExtras()` rides them on the
-start intent (`--ei width … height … fps … bitrate …`) and the APK (source in the
-separate `android-cam` repo, `3a5cbd8`) clamps to what the camera offers. The socket
-stays pure H.264 — its client is ffmpeg, which can neither send a config frame nor
-tolerate a reply — so the host never learns what a clamp chose. Sizes survive that
-(ffmpeg reads the real size off the SPS); fps does not, because `-r` must match the
-actual stream rate, which is why `COMPANION_CAM.fps` stays a single stop. Old APK +
-new host: extras ignored, defaults stream. New APK + old host: no extras, defaults
-stream. A rebuilt APK updates `src/android-cam.apk` and the sha256 comment in
-`src/companion.ts`.
+Size, bitrate and zoom are requests, not guarantees: `serviceExtras()` rides them on
+the start intent (`--ei width … height … fps … bitrate … zoom …`) and the APK (source
+in the separate `android-cam` repo, `6896011`) clamps to what the camera offers. The
+socket stays pure H.264 — its client is ffmpeg, which can neither send a config frame
+nor tolerate a reply — so the host never learns what a clamp chose. Sizes and zoom
+survive that (ffmpeg reads the real size off the SPS; a pinned zoom just looks less
+zoomed); fps does not, because `-r` must match the actual stream rate, which is why
+`COMPANION_CAM.fps` stays a single stop. Zoom is always sent — a re-run `am` keeps
+absent extras at their previous values, so "auto" must be an explicit 100. Rotation
+and aspect are the other direction: ffmpeg `-vf` filters in `ffmpegArgs()` (Annex-B
+has no rotation metadata; phone-side rotation would need a GL pass), so they work
+with any APK. Old APK + new host: extras ignored, defaults stream. New APK + old
+host: no extras, defaults stream. A rebuilt APK updates `src/android-cam.apk` and the
+sha256 comment in `src/companion.ts`.
 
 ### StreamRunner epochs
 

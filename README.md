@@ -59,11 +59,13 @@ they are not raised at all: the service is launched with
 `am start-foreground-service`, which does not exist there, so that phone is a hard
 block with no install that fixes it.
 
-Size and bitrate are picked in setup and ride the service's start intent; the
-phone clamps them to the nearest thing its camera supports and streams that.
-The rate is fixed at 30 fps, and there is no zoom, torch or rotation — the
-stream socket has no reply channel, so the host cannot learn what a clamped
-value became, and a wrong rate corrupts the timing host-side.
+Size, bitrate and digital zoom are picked in setup and ride the service's
+start intent; the phone clamps them to what its camera supports and streams
+that. Rotation and aspect crop (16:9 / 4:3 / 1:1) happen host-side in ffmpeg —
+the raw stream carries no rotation metadata, and a crop is free on the host.
+The rate is fixed at 30 fps and there is no torch — the stream socket has no
+reply channel, so the host cannot learn what a clamped value became, and a
+wrong rate corrupts the timing host-side.
 
 ## Install
 

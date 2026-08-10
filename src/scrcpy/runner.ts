@@ -107,7 +107,7 @@ export class StreamRunner {
   /** `buildArgs` stays scrcpy-only; the companion path is a different program entirely. */
   private command(): string[] {
     return this.config.backend === "companion"
-      ? [this.ffmpegPath, ...ffmpegArgs(PORT, this.config.sink, this.config.fps)]
+      ? [this.ffmpegPath, ...ffmpegArgs(PORT, this.config)]
       : [this.scrcpyPath, ...buildArgs(this.config)]
   }
 

@@ -1,4 +1,6 @@
 export const ORIENTATIONS = ["0", "90", "180", "270", "flip0", "flip90", "flip180", "flip270"] as const
+/** Companion backend only: ffmpeg crops host-side. scrcpy streams the camera's own aspect. */
+export const ASPECTS = ["native", "16:9", "4:3", "1:1"] as const
 
 export interface StreamConfig {
   cameraId: string
@@ -18,6 +20,8 @@ export interface StreamConfig {
    */
   backend: "scrcpy" | "companion"
   orientation: (typeof ORIENTATIONS)[number]
+  /** Only the companion path honours it (ffmpeg crop); the scrcpy path has no crop stage. */
+  aspect: (typeof ASPECTS)[number]
   v4l2Buffer: number
 }
 
@@ -33,6 +37,7 @@ export const DEFAULT_CONFIG: StreamConfig = {
   serial: null,
   backend: "scrcpy",
   orientation: "0",
+  aspect: "native",
   v4l2Buffer: 0,
 }
 
