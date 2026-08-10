@@ -12,7 +12,9 @@ import { FilteredSelect, Stepper } from "./widgets"
 
 const FIELDS = ["device", "camera", "size", "fps", "zoom", "bitrate", "orientation", "buffer", "sink"] as const
 type Field = (typeof FIELDS)[number]
-const OUTPUT_FIELDS: Field[] = ["fps", "zoom", "bitrate", "orientation", "buffer", "sink"]
+// The "1 camera" and "2 resolution" panels own these; whatever fieldsFor(backend) leaves
+// is what belongs in the "3 output" box, so this is the only place that split is named.
+const PANEL_FIELDS: Field[] = ["device", "camera", "size"]
 
 /**
  * The companion APK compiles camera, size, fps and bitrate in and has no control channel,
@@ -317,7 +319,10 @@ export function Setup(props: {
   const currentDevice = deviceList.find((d) => d.serial === config.serial)
   const currentSdk = currentDevice?.sdk
   const companion = config.backend === "companion"
-  const outputFocused = OUTPUT_FIELDS.includes(field)
+  // Derived from fieldsFor rather than a second hardcoded list, so a field that stops
+  // being valid for this backend (a device switch, not just a keypress) also stops
+  // being able to hold the output box open with nothing in it focused.
+  const outputFocused = fieldsFor(config.backend).includes(field) && !PANEL_FIELDS.includes(field)
 
   return (
     <box
