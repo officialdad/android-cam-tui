@@ -3,11 +3,29 @@ import { COMPANION_CAM } from "./companion"
 import { loadConfig, saveConfig, type StreamConfig } from "./config"
 import { backendFor } from "./doctor"
 import { openPreview } from "./preview"
-import { listDevices } from "./scrcpy/devices"
+import { listDevices, type DeviceInfo } from "./scrcpy/devices"
 import { probeCameras, type CameraInfo } from "./scrcpy/probe"
 import { StreamRunner, type StreamEvent } from "./scrcpy/runner"
 import { Dashboard, eventToLog, type LogLine } from "./ui/dashboard"
 import { nextStop, Setup, zoomStops } from "./ui/setup"
+
+/**
+ * What `--start` must hand to `start()` for the phone actually attached. `--start` skips
+ * the setup screen, so nothing has run `reconcile()` — a config saved during a scrcpy
+ * session names a size and fps the companion APK compiles in and ignores entirely, so a
+ * switch to the companion backend has to snap those two fields (and highSpeed, which the
+ * APK has no such session for) onto `COMPANION_CAM` here, the same place the backend
+ * itself gets re-derived. Exported so the snap is testable without rendering the app.
+ */
+export function autoStartConfig(cfg: StreamConfig, dev: DeviceInfo | undefined): StreamConfig {
+  const backend = backendFor(dev?.sdk)
+  return {
+    ...cfg,
+    serial: dev?.serial ?? cfg.serial,
+    backend,
+    ...(backend === "companion" && { size: COMPANION_CAM.maxSize, fps: COMPANION_CAM.fps[0], highSpeed: false }),
+  }
+}
 
 export function App(props: { onQuit: () => void; autoStart?: boolean }) {
   const [screen, setScreen] = useState<"setup" | "dashboard" | "starting">(
@@ -66,7 +84,7 @@ export function App(props: { onQuit: () => void; autoStart?: boolean }) {
       const cfg = await loadConfig()
       const devices = await listDevices()
       const dev = devices.find((d) => d.serial === cfg.serial) ?? devices.find((d) => d.state === "device")
-      await start({ ...cfg, serial: dev?.serial ?? cfg.serial, backend: backendFor(dev?.sdk) })
+      await start(autoStartConfig(cfg, dev))
     })()
   }, [props.autoStart, start])
 
