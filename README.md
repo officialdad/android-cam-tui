@@ -59,13 +59,13 @@ they are not raised at all: the service is launched with
 `am start-foreground-service`, which does not exist there, so that phone is a hard
 block with no install that fixes it.
 
-Size, bitrate and digital zoom are picked in setup and ride the service's
-start intent; the phone clamps them to what its camera supports and streams
-that. Rotation and aspect crop (16:9 / 4:3 / 1:1) happen host-side in ffmpeg —
-the raw stream carries no rotation metadata, and a crop is free on the host.
-The rate is fixed at 30 fps and there is no torch — the stream socket has no
-reply channel, so the host cannot learn what a clamped value became, and a
-wrong rate corrupts the timing host-side.
+The APK reports its real cameras — ids, facing, sizes, frame rates, zoom
+ceiling, sensor orientation — over `dumpsys`, so the picker shows what the
+phone actually has: camera selection, real sizes and fps options, a real zoom
+range, and the rotate option pre-selected from the sensor's orientation.
+Camera, size, fps, bitrate and digital zoom ride the service's start intent;
+rotation and aspect crop happen host-side in ffmpeg. There is no torch, and an
+APK too old to answer the probe falls back to fixed 1280x720@30 requests.
 
 ## Install
 

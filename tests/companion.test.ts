@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { COMPANION_CAM, ffmpegArgs, parseBitrate, parseCompanionState, serviceExtras, socketReady } from "../src/companion"
+import {
+  COMPANION_CAM,
+  ffmpegArgs,
+  parseBitrate,
+  parseCompanionProbe,
+  parseCompanionState,
+  serviceExtras,
+  socketReady,
+} from "../src/companion"
 
 const fixture = (name: string) => Bun.file(`${import.meta.dir}/fixtures/${name}`).text()
 
@@ -120,26 +128,62 @@ describe("parseBitrate", () => {
 })
 
 describe("serviceExtras", () => {
-  test("splits the size and converts the bitrate and zoom for the intent", () => {
-    expect(serviceExtras({ size: "1920x1080", fps: 30, bitrate: "8M", zoom: 1.5 })).toEqual([
+  test("splits the size and converts the bitrate, zoom and camera for the intent", () => {
+    expect(serviceExtras({ size: "1920x1080", fps: 30, bitrate: "8M", zoom: 1.5, cameraId: "1" })).toEqual([
       ...["--ei", "width", "1920", "--ei", "height", "1080"],
       ...["--ei", "fps", "30", "--ei", "bitrate", "8000000"],
       ...["--ei", "zoom", "150"],
+      ...["--es", "camera", "1"],
     ])
   })
 
   // A re-run `am` keeps absent extras at their previous values, so "auto" must be an
   // explicit 100 (= off to the service) — dropping the extra would leave the phone zoomed.
   test("auto zoom is sent as an explicit 100, never omitted", () => {
-    const extras = serviceExtras({ size: "1280x720", fps: 30, bitrate: "8M", zoom: null })
-    expect(extras.slice(extras.indexOf("zoom"))).toEqual(["zoom", "100"])
+    const extras = serviceExtras({ size: "1280x720", fps: 30, bitrate: "8M", zoom: null, cameraId: "0" })
+    expect(extras.slice(extras.indexOf("zoom"), extras.indexOf("zoom") + 2)).toEqual(["zoom", "100"])
+  })
+})
+
+describe("parseCompanionProbe", () => {
+  test("reads real cameras out of the dumpsys wrapper", async () => {
+    const cams = parseCompanionProbe(await fixture("dumpsys-service-probe.txt"))!
+    expect(cams.map((c) => c.id)).toEqual(["0", "1"])
+    expect(cams[0]).toMatchObject({
+      facing: "back",
+      maxSize: "4000x3000",
+      fps: [15, 30], // distinct AE upper bounds, ascending
+      zoomRange: [1, 4],
+      orientation: 90,
+    })
+    // maxZoom 1.0 means no digital zoom, not a [1,1] range; the front sensor sits at 270.
+    expect(cams[1].zoomRange).toBeNull()
+    expect(cams[1].orientation).toBe(270)
+    expect(cams[1].facing).toBe("front")
+  })
+
+  // An old APK has no dump() override — the framework prints its generic service dump and
+  // no JSON. Null is the signal to fall back to the COMPANION_CAM constants.
+  test("an old APK's dump yields null, not a crash or an empty picker", async () => {
+    expect(parseCompanionProbe(await fixture("dumpsys-service-old.txt"))).toBeNull()
+    expect(parseCompanionProbe("")).toBeNull()
+    expect(parseCompanionProbe('  {"cameras": not json}')).toBeNull()
+  })
+
+  test("a camera with no sizes is dropped rather than breaking the picker", () => {
+    const cams = parseCompanionProbe(
+      '{"cameras":[{"id":"0","facing":"back","sizes":[],"fpsRanges":[]},{"id":"1","facing":"front","sizes":["1280x720"],"fpsRanges":[]}]}',
+    )!
+    expect(cams.map((c) => c.id)).toEqual(["1"])
+    // No AE ranges reported: fall back to the constant's rate rather than an empty stepper.
+    expect(cams[0].fps).toEqual(COMPANION_CAM.fps)
   })
 })
 
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { companionState, materializeApk, prepPhone } from "../src/companion"
+import { companionState, materializeApk, prepPhone, probeCompanionCams } from "../src/companion"
 
 /**
  * A fake adb that answers by subcommand. Written to a tmpdir per test because env vars do
@@ -174,11 +218,11 @@ describe("prepPhone", () => {
   test("forwards the port and starts the service before the socket poll", async () => {
     const log = join(mkdtempSync(join(tmpdir(), "adblog-")), "calls")
     const bin = fakeAdb(`echo "$@" >> ${log}\ncase "$*" in *"/proc/net/unix"*) ${UNIX_READY};; esac`)
-    await prepPhone("R5CT", bin, serviceExtras({ size: "1920x1080", fps: 30, bitrate: "8M", zoom: null }))
+    await prepPhone("R5CT", bin, serviceExtras({ size: "1920x1080", fps: 30, bitrate: "8M", zoom: null, cameraId: "0" }))
     const calls = await Bun.file(log).text()
     expect(calls).toContain("-s R5CT forward tcp:27183 localabstract:android-cam")
     expect(calls).toContain(
-      "-s R5CT shell am start-foreground-service -n com.officialdad.androidcam/.CamService --ei width 1920 --ei height 1080 --ei fps 30 --ei bitrate 8000000 --ei zoom 100",
+      "-s R5CT shell am start-foreground-service -n com.officialdad.androidcam/.CamService --ei width 1920 --ei height 1080 --ei fps 30 --ei bitrate 8000000 --ei zoom 100 --es camera 0",
     )
     // No activity is ever started: waking a locked phone starts face unlock, which opens a
     // camera of its own and gets our own open rejected.
@@ -203,6 +247,29 @@ describe("prepPhone", () => {
   test("a failed forward is reported rather than swallowed", async () => {
     const bin = fakeAdb(`case "$*" in *forward*) echo "error: device offline" >&2; exit 1;; esac`)
     expect(prepPhone("R5CT", bin)).rejects.toThrow(/device offline/)
+  })
+})
+
+describe("probeCompanionCams", () => {
+  const DUMPSYS_PROBE = `case "$*" in *dumpsys*) cat ${import.meta.dir}/fixtures/dumpsys-service-probe.txt;; esac`
+
+  test("starts the service, then reads real cameras over dumpsys", async () => {
+    const bin = fakeAdb(DUMPSYS_PROBE)
+    const cams = (await probeCompanionCams("R5CT", bin))!
+    expect(cams.map((c) => c.id)).toEqual(["0", "1"])
+  })
+
+  // An old APK answers dumpsys with the framework's generic dump forever — the poll must
+  // give up and report null so the caller falls back to COMPANION_CAM.
+  test("an old APK yields null after the poll runs dry", async () => {
+    const bin = fakeAdb(`case "$*" in *dumpsys*) cat ${import.meta.dir}/fixtures/dumpsys-service-old.txt;; esac`)
+    expect(await probeCompanionCams("R5CT", bin, 2)).toBeNull()
+  })
+
+  test("a failed service start yields null without polling", async () => {
+    const bin = fakeAdb(`case "$*" in *start-foreground-service*) echo "Error: not found";; esac`)
+    expect(await probeCompanionCams("R5CT", bin)).toBeNull()
+    expect(await probeCompanionCams("R5CT", "/nonexistent/adb")).toBeNull()
   })
 })
 

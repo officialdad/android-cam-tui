@@ -1,0 +1,12 @@
+ACTIVITY MANAGER SERVICES (dumpsys activity services)
+  User 0 active services:
+  * ServiceRecord{5b0e2f1 u0 com.officialdad.androidcam/.CamService}
+    intent={cmp=com.officialdad.androidcam/.CamService}
+    packageName=com.officialdad.androidcam
+    processName=com.officialdad.androidcam
+    baseDir=/data/app/com.officialdad.androidcam-1/base.apk
+    createTime=-3m12s startingBgTimeout=--
+    lastActivity=-3m12s restartTime=-3m12s createdFromFg=true
+    startRequested=true delayedStop=false stopIfKilled=false callStart=true lastStartId=2
+    isForeground=true foregroundId=1 foregroundNoti=Notification(channel=android-cam pri=0)
+    {"cameras":[{"id":"0","facing":"back","orientation":90,"maxZoom":4.0,"sizes":["4000x3000","1920x1080","1280x720","640x480"],"fpsRanges":[[15,15],[15,30],[30,30]]},{"id":"1","facing":"front","orientation":270,"maxZoom":1.0,"sizes":["1920x1080","1280x720"],"fpsRanges":[[15,30],[30,30]]}]}

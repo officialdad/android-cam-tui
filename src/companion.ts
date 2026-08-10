@@ -1,6 +1,6 @@
-// Built from github.com/officialdad/android-cam at 6896011 ("feat: digital zoom via a
-// `zoom` intent extra"). sha256
-// b64ff5f1a15824028289daaa4f8ea7d6b18d9c8420ad49c437d066d697370c95, 16787 bytes. The
+// Built from github.com/officialdad/android-cam at fcc681d ("feat: camera probe over
+// dumpsys, camera selection extra"). sha256
+// b8a51d3016daa447ce244b91831582e84d7fcc1049b64d23dbd7da9f5c89a7ac, 16787 bytes. The
 // doctor tells users to install this on their phone, so a rebuild updates both lines.
 import apk from "./android-cam.apk" with { type: "file" }
 import { homedir } from "node:os"
@@ -14,15 +14,14 @@ export const SOCKET = "android-cam"
 export const PORT = 27183
 
 /**
- * What the APK accepts, as constants rather than a probe result — asking scrcpy to list
- * cameras on one of these phones is the very thing that fails, so there is nothing to
- * probe with. Since 3a5cbd8 the start intent carries size/fps/bitrate extras and the
- * service clamps them to what the camera offers, so the sizes here are requests, not
- * guarantees: a phone that lacks one streams the nearest it has, and the host never
- * learns which (ffmpeg reads the real size off the H.264 SPS, so nothing downstream
- * cares). fps stays a single stop because it is different: `-r` in `ffmpegArgs` must
- * match the actual stream rate, and a silently clamped fps would corrupt the timing
- * host-side. Widening it needs a reply channel the socket deliberately does not have.
+ * The old-APK fallback, used only when `probeCompanionCams` gets no answer — an APK from
+ * before the dumpsys probe (fcc681d) cannot report its real cameras, and asking scrcpy is
+ * the very thing that fails on these phones. Everything here is then a request the phone
+ * clamps: sizes survive that (ffmpeg reads the real size off the H.264 SPS), fps must
+ * stay the single stop the APK defaults to, because `-r` in `ffmpegArgs` has to match the
+ * actual stream rate and a silently clamped fps would corrupt the timing host-side. A
+ * probed camera list has no such problem — its fps options are the AE-range upper bounds,
+ * which the service honours exactly.
  */
 export const COMPANION_CAM: CameraInfo = {
   id: "0",
@@ -39,6 +38,78 @@ export const COMPANION_CAM: CameraInfo = {
 export interface CompanionState {
   installed: boolean
   granted: boolean
+}
+
+/**
+ * The probe reply: `dumpsys activity service <pkg>/.CamService` routes through the
+ * service's own dump(), which prints one line of JSON somewhere in ActivityManager's
+ * headers and indentation — take the first `{` to the last `}` on the line containing
+ * `"cameras"`. An old APK prints no such line; null means "fall back to COMPANION_CAM".
+ * Malformed entries are skipped rather than failing the probe: one bad camera must not
+ * take down the picker.
+ */
+export function parseCompanionProbe(dumpsys: string): CameraInfo[] | null {
+  const line = dumpsys.split("\n").find((l) => l.includes('"cameras"'))
+  if (!line) return null
+  const start = line.indexOf("{")
+  const end = line.lastIndexOf("}")
+  if (start < 0 || end <= start) return null
+  try {
+    const cams: CameraInfo[] = []
+    for (const c of JSON.parse(line.slice(start, end + 1)).cameras ?? []) {
+      const sizes: string[] = (c.sizes ?? []).filter((s: unknown) => typeof s === "string")
+      if (typeof c.id !== "string" || sizes.length === 0) continue // nothing streamable
+      // Distinct AE upper bounds, ascending. Offering only uppers is what keeps ffmpeg's
+      // `-r` honest: the service picks the range whose upper matches, so a rate from this
+      // list is never silently clamped to something else.
+      const fps = [...new Set<number>((c.fpsRanges ?? []).map((r: number[]) => r[1]))]
+        .filter((f) => Number.isFinite(f) && f > 0)
+        .sort((a, b) => a - b)
+      cams.push({
+        id: c.id,
+        facing: c.facing === "front" || c.facing === "external" ? c.facing : "back",
+        maxSize: sizes[0], // dump() sorts descending by area
+        fps: fps.length > 0 ? [...fps] : [...COMPANION_CAM.fps],
+        zoomRange: typeof c.maxZoom === "number" && c.maxZoom > 1 ? [1, c.maxZoom] : null,
+        sizes,
+        highSpeed: {},
+        orientation: typeof c.orientation === "number" ? c.orientation : undefined,
+      })
+    }
+    return cams.length > 0 ? cams : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Probe the phone's real cameras through the running service. Starts it first (idempotent,
+ * extras absent so the config is untouched) because dump() only answers a live service —
+ * and it may take a beat to come up, hence the poll. The camera itself is not opened:
+ * reading characteristics needs no CAMERA grant, so this works even before the permission
+ * is granted. Null — adb gone, APK missing or too old to answer — means COMPANION_CAM.
+ */
+export async function probeCompanionCams(
+  serial: string | null,
+  adbPath = "adb",
+  tries = 10,
+): Promise<CameraInfo[] | null> {
+  const base = serial ? [adbPath, "-s", serial] : [adbPath]
+  try {
+    const svc = await adb([...base, "shell", "am", "start-foreground-service", "-n", `${PKG}/.CamService`])
+    // Nonzero covers a dead adb or absent device; `Error:` is `am`'s own stdout failure
+    // mode (exit 0). Either way there is no service to poll, so don't spend 2s trying.
+    if (svc.code !== 0 || /^Error:/m.test(svc.out)) return null
+    for (let i = 0; i < tries; i++) {
+      const { out } = await adb([...base, "shell", "dumpsys", "activity", "service", `${PKG}/.CamService`])
+      const cams = parseCompanionProbe(out)
+      if (cams) return cams
+      await Bun.sleep(200)
+    }
+  } catch {
+    // fall through — no adb is its own doctor check
+  }
+  return null
 }
 
 /**
@@ -75,7 +146,9 @@ export function parseBitrate(b: string): number {
  * config frame nor tolerate a reply ahead of the Annex-B. The service clamps these to
  * what the camera offers and applies them at the next client connect.
  */
-export function serviceExtras(c: Pick<StreamConfig, "size" | "fps" | "bitrate" | "zoom">): string[] {
+export function serviceExtras(
+  c: Pick<StreamConfig, "size" | "fps" | "bitrate" | "zoom" | "cameraId">,
+): string[] {
   const [width, height] = c.size.split("x")
   return [
     ...["--ei", "width", width, "--ei", "height", height],
@@ -85,6 +158,9 @@ export function serviceExtras(c: Pick<StreamConfig, "size" | "fps" | "bitrate" |
     // values, so dropping the extra after zooming would leave the phone zoomed forever.
     // The service reads ≤100 as off, which is what auto means here (no digital crop).
     ...["--ei", "zoom", String(c.zoom === null ? 100 : Math.round(c.zoom * 100))],
+    // String extra — camera2 ids are strings, and an unknown one falls back to the back
+    // camera on the phone (clamp, never fail).
+    ...["--es", "camera", c.cameraId],
   ]
 }
 

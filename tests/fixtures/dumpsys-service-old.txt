@@ -1,0 +1,10 @@
+ACTIVITY MANAGER SERVICES (dumpsys activity services)
+  User 0 active services:
+  * ServiceRecord{2f91ac0 u0 com.officialdad.androidcam/.CamService}
+    intent={cmp=com.officialdad.androidcam/.CamService}
+    packageName=com.officialdad.androidcam
+    processName=com.officialdad.androidcam
+    createTime=-1m03s startingBgTimeout=--
+    startRequested=true delayedStop=false stopIfKilled=false callStart=true lastStartId=1
+    isForeground=true foregroundId=1 foregroundNoti=Notification(channel=android-cam pri=0)
+    nothing to dump

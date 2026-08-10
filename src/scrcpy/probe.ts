@@ -7,6 +7,11 @@ export interface CameraInfo {
   sizes: string[]
   /** Size -> frame rates reachable only via `--camera-high-speed`. Usually 120/240. */
   highSpeed: Record<string, number[]>
+  /**
+   * SENSOR_ORIENTATION degrees, companion probe only — scrcpy rotates server-side and
+   * never reports it. Used to pre-select the rotate option instead of making the user guess.
+   */
+  orientation?: number
 }
 
 export interface SinkInfo {

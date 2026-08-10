@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { COMPANION_CAM } from "./companion"
+import { COMPANION_CAM, probeCompanionCams } from "./companion"
 import { loadConfig, saveConfig, type StreamConfig } from "./config"
 import { backendFor } from "./doctor"
 import { openPreview } from "./preview"
@@ -7,21 +7,25 @@ import { listDevices, type DeviceInfo } from "./scrcpy/devices"
 import { probeCameras, type CameraInfo } from "./scrcpy/probe"
 import { StreamRunner, type StreamEvent } from "./scrcpy/runner"
 import { Dashboard, eventToLog, type LogLine } from "./ui/dashboard"
-import { nextStop, reconcile, Setup, zoomStops } from "./ui/setup"
+import { nextStop, reconcile, Setup, suggestedRotation, zoomStops } from "./ui/setup"
 
 /**
  * What `--start` must hand to `start()` for the phone actually attached. `--start` skips
  * the setup screen, so nothing has run `reconcile()` — and a config saved during a scrcpy
- * session names a camera, size and fps the companion APK compiles in and ignores. Snapping
- * them here by hand would re-derive reconcile's job and still leave cameraId and zoom
- * stale, so the companion branch routes through `reconcile()` itself against the one
- * camera that path has. `sinks: []` preserves the saved sink. Exported so the snap is
- * testable without rendering the app.
+ * session can name a camera, size and fps this phone's APK does not offer. Snapping them
+ * here by hand would re-derive reconcile's job and still leave cameraId and zoom stale,
+ * so the companion branch routes through `reconcile()` itself — against the dumpsys-probed
+ * cameras when the caller has them, else the COMPANION_CAM fallback. `sinks: []` preserves
+ * the saved sink. Exported so the snap is testable without rendering the app.
  */
-export function autoStartConfig(cfg: StreamConfig, dev: DeviceInfo | undefined): StreamConfig {
+export function autoStartConfig(
+  cfg: StreamConfig,
+  dev: DeviceInfo | undefined,
+  cams: CameraInfo[] = [COMPANION_CAM],
+): StreamConfig {
   const next = { ...cfg, serial: dev?.serial ?? cfg.serial }
   const backend = backendFor(dev?.sdk)
-  return backend === "companion" ? reconcile(next, [COMPANION_CAM], [], dev?.sdk) : { ...next, backend }
+  return backend === "companion" ? reconcile(next, cams, [], dev?.sdk) : { ...next, backend }
 }
 
 export function App(props: { onQuit: () => void; autoStart?: boolean }) {
@@ -54,10 +58,14 @@ export function App(props: { onQuit: () => void; autoStart?: boolean }) {
       startingRef.current = true
       void saveConfig(c)
       try {
-        camerasRef.current =
-          c.backend === "companion" ? [COMPANION_CAM] : await probeCameras("scrcpy", c.serial)
+        // scrcpy's camera list must be probed *before* the stream holds the camera; the
+        // companion probe is the reverse — dump() only answers a running service, which
+        // `prepPhone()` (inside runner.start) guarantees, and it never opens the camera.
+        if (c.backend !== "companion") camerasRef.current = await probeCameras("scrcpy", c.serial)
         const runner = new StreamRunner({ onEvent: pushEvent })
         await runner.start(c)
+        if (c.backend === "companion")
+          camerasRef.current = (await probeCompanionCams(c.serial)) ?? [COMPANION_CAM]
         runnerRef.current = runner
         setConfig(c)
         setScreen("dashboard")
@@ -81,7 +89,11 @@ export function App(props: { onQuit: () => void; autoStart?: boolean }) {
       const cfg = await loadConfig()
       const devices = await listDevices()
       const dev = devices.find((d) => d.serial === cfg.serial) ?? devices.find((d) => d.state === "device")
-      await start(autoStartConfig(cfg, dev))
+      // The probe starts the service itself, so it works before the runner does; without
+      // it a saved front-camera config would be snapped back to the fallback's camera "0".
+      const cams =
+        backendFor(dev?.sdk) === "companion" ? ((await probeCompanionCams(dev?.serial ?? cfg.serial)) ?? undefined) : undefined
+      await start(autoStartConfig(cfg, dev, cams))
     })()
   }, [props.autoStart, start])
 
@@ -127,6 +139,7 @@ export function App(props: { onQuit: () => void; autoStart?: boolean }) {
           size: next.sizes.includes(config.size) ? config.size : next.sizes[0],
           fps: next.fps.includes(config.fps) ? config.fps : next.fps[next.fps.length - 1],
           zoom: null,
+          orientation: suggestedRotation(next) ?? config.orientation,
         })
       }}
       onTorchToggle={() => void applyConfig({ ...config, torch: !config.torch })}

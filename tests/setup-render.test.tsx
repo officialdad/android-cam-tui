@@ -4,6 +4,7 @@ import { testRender } from "@opentui/react/test-utils"
 import type { StreamConfig } from "../src/config"
 import { checks, MIN_SDK, type Env } from "../src/doctor"
 import type { CameraInfo } from "../src/scrcpy/probe"
+import { COMPANION_CAM } from "../src/companion"
 import { companionCeiling, Setup } from "../src/ui/setup"
 
 const HEALTHY: Env = {
@@ -271,6 +272,8 @@ describe("Setup → companion backend", () => {
         await gate
         return COMPANION_ENV
       },
+      // The old-APK fallback: dumpsys answered nothing, the constants stand in.
+      companionCams: async () => [COMPANION_CAM],
     }
     const t = await testRender(<Setup onStart={onStart} probes={probes} />, { width, height })
     await act(async () => {
@@ -288,7 +291,7 @@ describe("Setup → companion backend", () => {
 
     expect(frame).toContain("android-cam-tui — setup")
     expect(frame).not.toContain("missing dependencies")
-    expect(frame).toContain(companionCeiling())
+    expect(frame).toContain(companionCeiling(true))
     expect(frame).toContain("ffmpeg -hide_banner")
     // The full ffmpeg line wraps across the box at this width, so PORT is checked as its
     // own substring rather than as part of the unbroken "tcp://127.0.0.1:27183".

@@ -3,7 +3,7 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/react"
 import type { SelectOption } from "@opentui/core"
 import { ASPECTS, buildArgs, loadConfig, ORIENTATIONS, type StreamConfig } from "../config"
 import { backendFor, checks, probeEnv, MIN_SDK, type Check, type Env } from "../doctor"
-import { COMPANION_CAM, ffmpegArgs, PORT } from "../companion"
+import { COMPANION_CAM, ffmpegArgs, PORT, probeCompanionCams } from "../companion"
 import { goUsb, goWireless, type DeviceInfo } from "../scrcpy/devices"
 import { probeCameras, type CameraInfo, type SinkInfo } from "../scrcpy/probe"
 import { Doctor } from "./doctor"
@@ -99,6 +99,17 @@ export const deviceLabel = (d: DeviceInfo) =>
     .join("  ")
 
 /**
+ * The rotation that lands a camera's buffers upright-landscape (the webcam shape).
+ * SENSOR_ORIENTATION is the clockwise turn that makes the buffer upright in the device's
+ * natural portrait; a webcam wants landscape, which sits 90° before that. Only the
+ * companion probe reports it — null says "leave the user's pick alone".
+ */
+export function suggestedRotation(cam: CameraInfo): StreamConfig["orientation"] | null {
+  if (cam.orientation === undefined) return null
+  return String((((cam.orientation - 90) % 360) + 360) % 360) as StreamConfig["orientation"]
+}
+
+/**
  * Snap a saved config onto what the selected phone actually reports. A config can
  * name a camera, size or fps that this device does not have — after a device switch
  * it almost always does — so every dependent field is re-validated together.
@@ -126,14 +137,23 @@ export function reconcile(
     fps: stop?.fps ?? cfg.fps,
     highSpeed: stop?.highSpeed ?? false,
     zoom: zoomOk ? cfg.zoom : null,
+    // Only when the saved camera did not survive the snap: a config that kept its camera
+    // keeps the rotation the user chose for it.
+    orientation: (cam.id !== cfg.cameraId ? suggestedRotation(cam) : null) ?? cfg.orientation,
     sink: sinks.find((s) => s.path === cfg.sink)?.path ?? sinks[0]?.path ?? cfg.sink,
     backend: backendFor(sdk),
   }
 }
 
-/** Read off COMPANION_CAM, not retyped: sizes are requests the phone clamps, not a probe. */
-export const companionCeiling = () =>
-  `companion backend — ${COMPANION_CAM.fps[0]}fps, phone clamps size and zoom, no torch`
+/**
+ * With a real probe the caps *are* the phone's own, so only the missing feature needs
+ * saying. The fallback line covers an old APK that cannot answer dumpsys: everything on
+ * screen is then a request the phone clamps, and the user should know that.
+ */
+export const companionCeiling = (fallback: boolean) =>
+  fallback
+    ? `companion backend — old APK: ${COMPANION_CAM.fps[0]}fps, phone clamps size and zoom, no torch`
+    : "companion backend — no torch"
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -149,6 +169,8 @@ export function Setup(props: {
   probes?: {
     cameras(serial: string | null): Promise<CameraInfo[]>
     env(): Promise<Env>
+    /** Companion probe; the default asks the APK over dumpsys and falls back to COMPANION_CAM. */
+    companionCams?(serial: string | null): Promise<CameraInfo[]>
   }
 }) {
   const [cameras, setCameras] = useState<CameraInfo[] | null>(null)
@@ -167,10 +189,13 @@ export function Setup(props: {
 
   const getCameras = props.probes?.cameras ?? ((serial: string | null) => probeCameras("scrcpy", serial))
   const getEnv = props.probes?.env ?? probeEnv
+  const getCompanionCams =
+    props.probes?.companionCams ??
+    ((serial: string | null) => probeCompanionCams(serial).then((c) => c ?? [COMPANION_CAM]))
   // The handlers below are created fresh each render, so a ref keeps the effect's deps empty
   // without them going stale.
-  const probesRef = useRef({ getCameras, getEnv })
-  probesRef.current = { getCameras, getEnv }
+  const probesRef = useRef({ getCameras, getEnv, getCompanionCams })
+  probesRef.current = { getCameras, getEnv, getCompanionCams }
 
   const preflight = useCallback(async () => {
     setBusy(true)
@@ -190,11 +215,11 @@ export function Setup(props: {
         env.devices.find((d) => d.state === "device") ??
         env.devices[0]
       const serial = pick?.serial ?? null
-      // Asking scrcpy to list cameras on a pre-12 phone is the very thing that fails on the
-      // ROMs this path exists for, and the APK would ignore the answer anyway.
+      // Asking scrcpy to list cameras on a pre-12 phone is the very thing that fails on
+      // the ROMs this path exists for — the APK answers over dumpsys instead.
       const cams =
         backendFor(pick?.sdk) === "companion"
-          ? [COMPANION_CAM]
+          ? await probesRef.current.getCompanionCams(serial)
           : await probesRef.current.getCameras(serial)
       if (cams.length === 0) {
         // Routed through Doctor so the `scrcpy-version` warning rides along: "no cameras"
@@ -228,7 +253,9 @@ export function Setup(props: {
     const dev = devices.find((d) => d.serial === serial)
     try {
       const cams =
-        backendFor(dev?.sdk) === "companion" ? [COMPANION_CAM] : await probesRef.current.getCameras(serial)
+        backendFor(dev?.sdk) === "companion"
+          ? await probesRef.current.getCompanionCams(serial)
+          : await probesRef.current.getCameras(serial)
       if (cams.length === 0) {
         setNotice(`no cameras on ${serial}`)
         return
@@ -365,7 +392,21 @@ export function Setup(props: {
             onCaptureChange={(c) => (capturing.current = c)}
             onChange={(v) => {
               const next = cameras.find((c) => c.id === v)!
-              setConfig(reconcile({ ...config, cameraId: next.id, zoom: null }, cameras, sinks, currentSdk))
+              // The rotation suggestion must ride along explicitly: reconcile only suggests
+              // when a camera fails to survive the snap, and this one is being chosen.
+              setConfig(
+                reconcile(
+                  {
+                    ...config,
+                    cameraId: next.id,
+                    zoom: null,
+                    orientation: suggestedRotation(next) ?? config.orientation,
+                  },
+                  cameras,
+                  sinks,
+                  currentSdk,
+                ),
+              )
             }}
           />
         )}
@@ -454,7 +495,7 @@ export function Setup(props: {
           </box>
         )}
       </box>
-      {companion && <text fg="yellow">{companionCeiling()}</text>}
+      {companion && <text fg="yellow">{companionCeiling(cameras[0] === COMPANION_CAM)}</text>}
       <text fg="#888">
         {companion
           ? `ffmpeg ${ffmpegArgs(PORT, config).join(" ")}`

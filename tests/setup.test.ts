@@ -1,7 +1,17 @@
 import { describe, expect, test } from "bun:test"
 import { DEFAULT_CONFIG } from "../src/config"
 import type { CameraInfo, SinkInfo } from "../src/scrcpy/probe"
-import { bitrateStops, camSizes, deviceLabel, fieldsFor, fpsStops, nextStop, reconcile, zoomStops } from "../src/ui/setup"
+import {
+  bitrateStops,
+  camSizes,
+  deviceLabel,
+  fieldsFor,
+  fpsStops,
+  nextStop,
+  reconcile,
+  suggestedRotation,
+  zoomStops,
+} from "../src/ui/setup"
 
 const cams: CameraInfo[] = [
   { id: "0", facing: "back", maxSize: "4080x3060", fps: [24, 30, 60], zoomRange: [0.6, 10], sizes: ["1920x1080", "1280x720"], highSpeed: { "1280x720": [120, 240], "800x600": [240] } },
@@ -88,6 +98,17 @@ describe("reconcile", () => {
     expect(reconcile({ ...DEFAULT_CONFIG, sink: "/dev/video9" }, cams, sinks).sink).toBe("/dev/video3")
   })
 
+  // The companion probe reports SENSOR_ORIENTATION; a camera that fails the snap lands on
+  // one whose rotation the user has never seen, so the suggestion applies. A camera that
+  // survives keeps whatever the user dialed in.
+  test("suggests the rotation only when the camera did not survive the snap", () => {
+    const probed: CameraInfo[] = [{ ...cams[1], id: "0", orientation: 270 }]
+    const snapped = reconcile({ ...DEFAULT_CONFIG, cameraId: "9", orientation: "90" }, probed, sinks)
+    expect(snapped.orientation).toBe("180") // (270 - 90) % 360
+    const kept = reconcile({ ...DEFAULT_CONFIG, cameraId: "0", orientation: "90" }, probed, sinks)
+    expect(kept.orientation).toBe("90")
+  })
+
   test("preserves the sink when nothing was probed rather than blanking it", () => {
     expect(reconcile({ ...DEFAULT_CONFIG, sink: "/dev/video7" }, cams, []).sink).toBe("/dev/video7")
   })
@@ -160,6 +181,21 @@ describe("zoomStops", () => {
 
   test("degenerate range does not produce a duplicate", () => {
     expect(zoomStops([2, 2])).toEqual([null, 2])
+  })
+})
+
+describe("suggestedRotation", () => {
+  // Buffers arrive in sensor coordinates; SENSOR_ORIENTATION is the clockwise turn to
+  // upright-portrait, and a webcam wants upright-landscape — 90° before that.
+  test("maps sensor orientation to the webcam-upright rotation", () => {
+    expect(suggestedRotation({ ...cams[0], orientation: 90 })).toBe("0") // typical back
+    expect(suggestedRotation({ ...cams[0], orientation: 270 })).toBe("180") // typical front
+    expect(suggestedRotation({ ...cams[0], orientation: 0 })).toBe("270")
+    expect(suggestedRotation({ ...cams[0], orientation: 180 })).toBe("90")
+  })
+
+  test("no probe data, no opinion", () => {
+    expect(suggestedRotation(cams[0])).toBeNull()
   })
 })
 
