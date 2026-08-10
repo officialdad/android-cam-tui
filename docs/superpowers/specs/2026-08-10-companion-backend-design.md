@@ -21,6 +21,13 @@ companion backend Camera2 ▶ MediaCodec ▶ localabstract ──▶ ffmpeg ▶ 
 In: backend selection, the companion launch path, doctor checks for its prerequisites,
 setup and dashboard adjustments, APK vendoring.
 
+Out: **the revoked-`CAMERA` ROM case above.** It motivates the APK, not the routing.
+Backend selection below is automatic and reads the API level only, so a modern phone on
+one of those ROMs still gets sent down the scrcpy path and still fails — there is no
+signal to detect it with short of attempting a capture, and no user-facing override to
+force the companion path by hand. Serving it means a manual backend choice or a probe
+failure fallback; neither is built here. Do not go looking for that routing.
+
 Out: any change to the APK itself. Camera, resolution, fps and bitrate stay hardcoded at
 back camera / 1280x720 / 30 / 8M because the APK has no control channel. Adding one is a
 separate project in the `android-cam` repo.

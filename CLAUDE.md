@@ -48,7 +48,8 @@ its **spawn wrapper**, and that split is the entire testing seam:
 | `parseDevices` | `listDevices`, `goWireless`, `goUsb` | `src/scrcpy/devices.ts` |
 | `buildArgs` | — | `src/config.ts` |
 | `checks`, `detectDistro`, `parseScrcpyVersion` | `probeEnv` | `src/doctor.ts` |
-| `parseCompanionState`, `socketReady`, `ffmpegArgs` | `companionState`, `prepPhone` | `src/companion.ts` |
+| `parseCompanionState`, `socketReady` | `companionState`, `prepPhone`, `unforward` | `src/companion.ts` |
+| `ffmpegArgs` | — | `src/companion.ts` |
 
 Parsers are tested against text fixtures in `tests/fixtures/`. `StreamRunner` takes a
 `scrcpyPath` option so tests inject shell-script fakes (`fake-scrcpy.sh`, or one
@@ -98,6 +99,14 @@ that fails on these phones, and the APK has no control channel to honour the ans
 anyway. The `-r 30` before `-i` in `ffmpegArgs` is load-bearing: Annex-B carries no
 timestamps, so without it ffmpeg guesses the input rate and drops most frames
 converting down.
+
+`COMPANION_MIN_SDK` (26) is the floor under that floor: `am start-foreground-service`
+arrived in Android 8.0, so below it the APK installs and then never starts. The
+companion checks are **not** mutually exclusive with a usable modern handset the way
+`device-perms` and `device-auth` are — the backend is picked per selected device, so
+they warn when another phone works and block when none does. `stop()` removes the
+`adb forward`: it lives in the adb server and outlives the TUI, and anything that
+connects to that port makes the phone open its camera.
 
 The 1280x720@30 ceiling is scheduled, not permanent. `CamService.java` compiles
 `WIDTH`/`HEIGHT`/`FPS` in, and the host's only channel to it is
