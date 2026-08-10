@@ -25,6 +25,7 @@ const BARE: Env = {
   scrcpy: null,
   adb: null,
   v4l2ctl: null,
+  ffmpeg: null,
   player: null,
   scrcpyVersion: null,
   sinks: [],

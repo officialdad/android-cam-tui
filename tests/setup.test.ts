@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { DEFAULT_CONFIG } from "../src/config"
 import type { CameraInfo, SinkInfo } from "../src/scrcpy/probe"
-import { bitrateStops, camSizes, deviceLabel, fpsStops, nextStop, reconcile, zoomStops } from "../src/ui/setup"
+import { bitrateStops, camSizes, deviceLabel, fieldsFor, fpsStops, nextStop, reconcile, zoomStops } from "../src/ui/setup"
 
 const cams: CameraInfo[] = [
   { id: "0", facing: "back", maxSize: "4080x3060", fps: [24, 30, 60], zoomRange: [0.6, 10], sizes: ["1920x1080", "1280x720"], highSpeed: { "1280x720": [120, 240], "800x600": [240] } },
@@ -160,6 +160,20 @@ describe("zoomStops", () => {
 
   test("degenerate range does not produce a duplicate", () => {
     expect(zoomStops([2, 2])).toEqual([null, 2])
+  })
+})
+
+describe("fieldsFor", () => {
+  // Bitrate, zoom, rotate and buffer are all scrcpy flags. The APK compiles its settings in
+  // and has no control channel, so a stepper for them would silently do nothing — worse
+  // than not being there.
+  test("the companion path drops every field it cannot honour", () => {
+    expect(fieldsFor("companion")).toEqual(["device", "camera", "size", "sink"])
+  })
+
+  test("the scrcpy path keeps all of them", () => {
+    expect(fieldsFor("scrcpy")).toContain("bitrate")
+    expect(fieldsFor("scrcpy")).toContain("zoom")
   })
 })
 
