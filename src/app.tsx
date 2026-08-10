@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { COMPANION_CAM } from "./companion"
 import { loadConfig, saveConfig, type StreamConfig } from "./config"
+import { backendFor } from "./doctor"
 import { openPreview } from "./preview"
+import { listDevices } from "./scrcpy/devices"
 import { probeCameras, type CameraInfo } from "./scrcpy/probe"
 import { StreamRunner, type StreamEvent } from "./scrcpy/runner"
 import { Dashboard, eventToLog, type LogLine } from "./ui/dashboard"
@@ -36,7 +39,8 @@ export function App(props: { onQuit: () => void; autoStart?: boolean }) {
       startingRef.current = true
       void saveConfig(c)
       try {
-        camerasRef.current = await probeCameras("scrcpy", c.serial)
+        camerasRef.current =
+          c.backend === "companion" ? [COMPANION_CAM] : await probeCameras("scrcpy", c.serial)
         const runner = new StreamRunner({ onEvent: pushEvent })
         await runner.start(c)
         runnerRef.current = runner
@@ -52,10 +56,18 @@ export function App(props: { onQuit: () => void; autoStart?: boolean }) {
     [pushEvent, pushLog],
   )
 
-  // `--start` skips the setup screen with the last-used config. A config the phone can
-  // no longer satisfy just fails the probe, and start() already falls back to setup.
+  // `--start` skips the setup screen with the last-used config. Nothing has reconciled it,
+  // so the backend is re-derived here — a config written for one phone must not pick the
+  // wrong stream path for another. A config the phone can no longer satisfy just fails the
+  // probe, and start() already falls back to setup.
   useEffect(() => {
-    if (props.autoStart) void loadConfig().then(start)
+    if (!props.autoStart) return
+    void (async () => {
+      const cfg = await loadConfig()
+      const devices = await listDevices()
+      const dev = devices.find((d) => d.serial === cfg.serial) ?? devices.find((d) => d.state === "device")
+      await start({ ...cfg, serial: dev?.serial ?? cfg.serial, backend: backendFor(dev?.sdk) })
+    })()
   }, [props.autoStart, start])
 
   const applyConfig = useCallback(

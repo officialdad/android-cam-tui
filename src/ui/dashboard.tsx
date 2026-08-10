@@ -17,7 +17,7 @@ export function eventToLog(e: StreamEvent): string {
     case "device-lost":
       return "device disconnected"
     case "exited":
-      return `scrcpy exited (code ${e.code})${e.reason ? ` — ${e.reason}` : ""}`
+      return `stream exited (code ${e.code})${e.reason ? ` — ${e.reason}` : ""}`
     case "restarting":
       return `restarting (attempt ${e.attempt})…`
     case "gave-up":
@@ -45,10 +45,12 @@ export function Dashboard(props: {
     return () => clearInterval(t)
   }, [])
 
+  const companion = props.config.backend === "companion"
+
   useKeyboard((key) => {
-    if (key.name === "z") props.onZoomCycle()
+    if (key.name === "z" && !companion) props.onZoomCycle()
     if (key.name === "l") props.onCameraCycle()
-    if (key.name === "t") props.onTorchToggle()
+    if (key.name === "t" && !companion) props.onTorchToggle()
     if (key.name === "p") setNotice(props.onPreview())
     if (key.name === "r") props.onRestart()
     if (key.name === "s") props.onStop()
@@ -59,15 +61,22 @@ export function Dashboard(props: {
   const drops = props.log.filter((l) => l.msg.startsWith("restarting")).length
   const stateColor = props.state === "running" ? "green" : props.state === "restarting" ? "yellow" : "red"
 
-  const fields: [string, string][] = [
-    ["camera", props.config.cameraId],
-    ["size", props.config.size],
-    ["fps", props.config.highSpeed ? `${props.config.fps} hs` : String(props.config.fps)],
-    ["bitrate", props.config.bitrate],
-    ["zoom", props.config.zoom === null ? "auto" : `${props.config.zoom}x`],
-    ["torch", props.config.torch ? "on" : "off"],
-    ["sink", props.config.sink],
-  ]
+  const fields: [string, string][] = companion
+    ? [
+        ["camera", "back"],
+        ["size", props.config.size],
+        ["fps", String(props.config.fps)],
+        ["sink", props.config.sink],
+      ]
+    : [
+        ["camera", props.config.cameraId],
+        ["size", props.config.size],
+        ["fps", props.config.highSpeed ? `${props.config.fps} hs` : String(props.config.fps)],
+        ["bitrate", props.config.bitrate],
+        ["zoom", props.config.zoom === null ? "auto" : `${props.config.zoom}x`],
+        ["torch", props.config.torch ? "on" : "off"],
+        ["sink", props.config.sink],
+      ]
 
   return (
     <box style={{ border: true, padding: 1, flexDirection: "column", gap: 1 }} title="android-cam-tui — dashboard">
@@ -75,6 +84,7 @@ export function Dashboard(props: {
         <text fg={stateColor}>● {props.state.toUpperCase()}</text>
         <text>up {Math.floor(uptime / 60)}m{uptime % 60}s</text>
         <text>drops {drops}</text>
+        <text fg="#888">{companion ? "companion" : "scrcpy"}</text>
       </box>
       <box style={{ flexDirection: "row", gap: 1, flexGrow: 1 }}>
         <box title="stream" style={{ border: true, flexDirection: "column", width: 26 }}>
@@ -94,7 +104,11 @@ export function Dashboard(props: {
         </scrollbox>
       </box>
       {notice && <text fg="#888">{notice}</text>}
-      <text fg="cyan">z: zoom · l: camera · t: torch · p: preview · r: restart · s: stop → setup · q: quit</text>
+      <text fg="cyan">
+        {companion
+          ? "l: camera · p: preview · r: restart · s: stop → setup · q: quit"
+          : "z: zoom · l: camera · t: torch · p: preview · r: restart · s: stop → setup · q: quit"}
+      </text>
     </box>
   )
 }
