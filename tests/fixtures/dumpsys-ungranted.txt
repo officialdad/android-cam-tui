@@ -1,0 +1,11 @@
+Packages:
+  Package [com.officialdad.androidcam] (5f3a1c2):
+    userId=10247
+    versionCode=0 minSdk=21 targetSdk=32
+    requested permissions:
+      android.permission.CAMERA
+    install permissions:
+      android.permission.FOREGROUND_SERVICE: granted=true
+    User 0: ceDataInode=1441802 installed=true hidden=false
+      runtime permissions:
+        android.permission.CAMERA: granted=false, flags=[ ]
