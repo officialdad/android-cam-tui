@@ -127,7 +127,8 @@ export class StreamRunner {
         // A phone still booting is what retries are for: report the cause and fall into the
         // same backoff a mid-stream death takes, rather than rejecting out of start().
         this.lastError = e instanceof Error ? e.message : String(e)
-        return this.onExit(null)
+        void this.onExit(null)
+        return
       }
       if (this.epoch !== myEpoch) return
     }

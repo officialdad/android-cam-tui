@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DEFAULT_CONFIG } from "../src/config"
@@ -144,38 +144,48 @@ describe("StreamRunner", () => {
 
   const COMPANION = { ...DEFAULT_CONFIG, backend: "companion" as const, serial: "R5CT" }
   const UNIX_READY = `cat ${import.meta.dir}/fixtures/proc-net-unix-ready.txt`
-  const UNIX_COLD = `cat ${import.meta.dir}/fixtures/proc-net-unix-cold.txt`
 
   test("companion backend preps the phone, then spawns ffmpeg", async () => {
     const { events, onEvent } = collect()
     const log = join(mkdtempSync(join(tmpdir(), "adblog-")), "calls")
+    const ffmpegLog = join(mkdtempSync(join(tmpdir(), "ffmpeglog-")), "calls")
     const r = new StreamRunner({
       adbPath: fakeScrcpy(`echo "$@" >> ${log}\ncase "$*" in *"/proc/net/unix"*) ${UNIX_READY};; esac`),
-      ffmpegPath: fakeScrcpy("sleep 600"),
+      ffmpegPath: fakeScrcpy(`echo "$@" >> ${ffmpegLog}\nsleep 600`),
       restartDelayMs: 50,
       onEvent,
     })
     await r.start(COMPANION)
     await waitFor(() => events.some((e) => e.kind === "started"))
+    // "started" fires the instant Bun.spawn returns, racing the fake's own echo — give the
+    // shell a beat to flush the log before reading it.
+    await waitFor(() => existsSync(ffmpegLog) && readFileSync(ffmpegLog, "utf8").length > 0)
     await r.stop()
     const calls = await Bun.file(log).text()
     expect(calls).toContain("forward tcp:27183 localabstract:android-cam")
     expect(calls).toContain("am start-foreground-service")
+    // Proves command() picked the ffmpeg/companion args, not the scrcpy pair — a
+    // command() bug that returned buildArgs() here would still emit "started".
+    const ffmpegCalls = await Bun.file(ffmpegLog).text()
+    expect(ffmpegCalls).toContain("tcp://127.0.0.1:27183")
+    expect(ffmpegCalls).toContain(COMPANION.sink)
     expect(r.state).toBe("stopped")
   })
 
   // The prep is three adb round-trips of awaits. Without an epoch re-check after them, a
-  // stop() landing mid-prep leaves ffmpeg spawned and holding the sink.
+  // stop() landing mid-prep leaves ffmpeg spawned and holding the sink. Prep must succeed
+  // (slowly) here, not fail — a failing prep never reaches Bun.spawn regardless of the
+  // guard, which would make this test pass even with the guard deleted.
   test("stop() during the prep never spawns ffmpeg", async () => {
     const { events, onEvent } = collect()
     const r = new StreamRunner({
-      adbPath: fakeScrcpy(`case "$*" in *"/proc/net/unix"*) ${UNIX_COLD};; esac`),
+      adbPath: fakeScrcpy(`case "$*" in *"/proc/net/unix"*) sleep 0.3; ${UNIX_READY};; esac`),
       ffmpegPath: fakeScrcpy("sleep 600"),
       restartDelayMs: 50,
       onEvent,
     })
     void r.start(COMPANION)
-    await sleep(150) // mid socket-poll
+    await sleep(150) // stop() lands while prep is still in flight, well before it resolves
     await r.stop()
     await sleep(600)
     expect(events.filter((e) => e.kind === "started").length).toBe(0)
