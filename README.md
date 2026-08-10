@@ -150,7 +150,8 @@ Wireless adds jitter — raise `buffer` (`--v4l2-buffer`, in ms) if the feed stu
 ## Dashboard
 
 `z` cycle zoom presets, `l` cycle camera, `t` toggle the camera torch (fill
-light), `p` open a preview window, `r` restart, `s` back to setup, `q` quit.
+light — scrcpy backend only, the companion app has no torch), `p` open a
+preview window, `r` restart, `s` back to setup, `q` quit.
 
 Every camera parameter is fixed when the capture session opens, so zoom, torch
 and camera changes restart the stream — the sink drops for about a second.
