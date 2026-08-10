@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { DEFAULT_CONFIG } from "../src/config"
 import type { CameraInfo, SinkInfo } from "../src/scrcpy/probe"
-import { bitrateStops, camSizes, deviceLabel, fpsStops, nextStop, reconcile, zoomStops } from "../src/ui/setup"
+import { bitrateStops, camSizes, deviceLabel, fieldsFor, fpsStops, nextStop, reconcile, zoomStops } from "../src/ui/setup"
 
 const cams: CameraInfo[] = [
   { id: "0", facing: "back", maxSize: "4080x3060", fps: [24, 30, 60], zoomRange: [0.6, 10], sizes: ["1920x1080", "1280x720"], highSpeed: { "1280x720": [120, 240], "800x600": [240] } },
@@ -91,6 +91,26 @@ describe("reconcile", () => {
   test("preserves the sink when nothing was probed rather than blanking it", () => {
     expect(reconcile({ ...DEFAULT_CONFIG, sink: "/dev/video7" }, cams, []).sink).toBe("/dev/video7")
   })
+
+  // Never read from the saved file: a config outlives the phone it was written for, and
+  // after a device switch it names the wrong backend more often than the right one.
+  test("derives the backend from the phone's api level, overriding the saved value", () => {
+    const saved = { ...DEFAULT_CONFIG, backend: "companion" as const }
+    expect(reconcile(saved, cams, sinks, 34).backend).toBe("scrcpy")
+    expect(reconcile({ ...DEFAULT_CONFIG }, cams, sinks, 29).backend).toBe("companion")
+  })
+
+  test("api 31 exactly is the scrcpy side of the floor", () => {
+    expect(reconcile(DEFAULT_CONFIG, cams, sinks, 31).backend).toBe("scrcpy")
+    expect(reconcile(DEFAULT_CONFIG, cams, sinks, 30).backend).toBe("companion")
+  })
+
+  // An unauthorized or offline phone never answered getprop. Only a phone that provably
+  // reported below the floor is old; everything else has a check of its own.
+  test("an unknown api level stays on scrcpy", () => {
+    expect(reconcile(DEFAULT_CONFIG, cams, sinks).backend).toBe("scrcpy")
+    expect(reconcile(DEFAULT_CONFIG, cams, sinks, undefined).backend).toBe("scrcpy")
+  })
 })
 
 describe("deviceLabel", () => {
@@ -140,6 +160,20 @@ describe("zoomStops", () => {
 
   test("degenerate range does not produce a duplicate", () => {
     expect(zoomStops([2, 2])).toEqual([null, 2])
+  })
+})
+
+describe("fieldsFor", () => {
+  // Bitrate, zoom, rotate and buffer are all scrcpy flags. The APK compiles its settings in
+  // and has no control channel, so a stepper for them would silently do nothing — worse
+  // than not being there.
+  test("the companion path drops every field it cannot honour", () => {
+    expect(fieldsFor("companion")).toEqual(["device", "camera", "size", "sink"])
+  })
+
+  test("the scrcpy path keeps all of them", () => {
+    expect(fieldsFor("scrcpy")).toContain("bitrate")
+    expect(fieldsFor("scrcpy")).toContain("zoom")
   })
 })
 

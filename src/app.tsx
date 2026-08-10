@@ -1,10 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { COMPANION_CAM } from "./companion"
 import { loadConfig, saveConfig, type StreamConfig } from "./config"
+import { backendFor } from "./doctor"
 import { openPreview } from "./preview"
+import { listDevices, type DeviceInfo } from "./scrcpy/devices"
 import { probeCameras, type CameraInfo } from "./scrcpy/probe"
 import { StreamRunner, type StreamEvent } from "./scrcpy/runner"
 import { Dashboard, eventToLog, type LogLine } from "./ui/dashboard"
-import { nextStop, Setup, zoomStops } from "./ui/setup"
+import { nextStop, reconcile, Setup, zoomStops } from "./ui/setup"
+
+/**
+ * What `--start` must hand to `start()` for the phone actually attached. `--start` skips
+ * the setup screen, so nothing has run `reconcile()` — and a config saved during a scrcpy
+ * session names a camera, size and fps the companion APK compiles in and ignores. Snapping
+ * them here by hand would re-derive reconcile's job and still leave cameraId and zoom
+ * stale, so the companion branch routes through `reconcile()` itself against the one
+ * camera that path has. `sinks: []` preserves the saved sink. Exported so the snap is
+ * testable without rendering the app.
+ */
+export function autoStartConfig(cfg: StreamConfig, dev: DeviceInfo | undefined): StreamConfig {
+  const next = { ...cfg, serial: dev?.serial ?? cfg.serial }
+  const backend = backendFor(dev?.sdk)
+  return backend === "companion" ? reconcile(next, [COMPANION_CAM], [], dev?.sdk) : { ...next, backend }
+}
 
 export function App(props: { onQuit: () => void; autoStart?: boolean }) {
   const [screen, setScreen] = useState<"setup" | "dashboard" | "starting">(
@@ -36,7 +54,8 @@ export function App(props: { onQuit: () => void; autoStart?: boolean }) {
       startingRef.current = true
       void saveConfig(c)
       try {
-        camerasRef.current = await probeCameras("scrcpy", c.serial)
+        camerasRef.current =
+          c.backend === "companion" ? [COMPANION_CAM] : await probeCameras("scrcpy", c.serial)
         const runner = new StreamRunner({ onEvent: pushEvent })
         await runner.start(c)
         runnerRef.current = runner
@@ -52,10 +71,18 @@ export function App(props: { onQuit: () => void; autoStart?: boolean }) {
     [pushEvent, pushLog],
   )
 
-  // `--start` skips the setup screen with the last-used config. A config the phone can
-  // no longer satisfy just fails the probe, and start() already falls back to setup.
+  // `--start` skips the setup screen with the last-used config. Nothing has reconciled it,
+  // so the backend is re-derived here — a config written for one phone must not pick the
+  // wrong stream path for another. A config the phone can no longer satisfy just fails the
+  // probe, and start() already falls back to setup.
   useEffect(() => {
-    if (props.autoStart) void loadConfig().then(start)
+    if (!props.autoStart) return
+    void (async () => {
+      const cfg = await loadConfig()
+      const devices = await listDevices()
+      const dev = devices.find((d) => d.serial === cfg.serial) ?? devices.find((d) => d.state === "device")
+      await start(autoStartConfig(cfg, dev))
+    })()
   }, [props.autoStart, start])
 
   const applyConfig = useCallback(

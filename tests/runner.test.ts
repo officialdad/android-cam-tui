@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DEFAULT_CONFIG } from "../src/config"
@@ -140,5 +140,98 @@ describe("StreamRunner", () => {
     expect(r.state).toBe("running")
     const startedEvents = events.filter((e) => e.kind === "started")
     expect(startedEvents.length).toBe(2)
+  })
+
+  const COMPANION = { ...DEFAULT_CONFIG, backend: "companion" as const, serial: "R5CT" }
+  const UNIX_READY = `cat ${import.meta.dir}/fixtures/proc-net-unix-ready.txt`
+
+  test("companion backend preps the phone, then spawns ffmpeg", async () => {
+    const { events, onEvent } = collect()
+    const log = join(mkdtempSync(join(tmpdir(), "adblog-")), "calls")
+    const ffmpegLog = join(mkdtempSync(join(tmpdir(), "ffmpeglog-")), "calls")
+    const r = new StreamRunner({
+      adbPath: fakeScrcpy(`echo "$@" >> ${log}\ncase "$*" in *"/proc/net/unix"*) ${UNIX_READY};; esac`),
+      ffmpegPath: fakeScrcpy(`echo "$@" >> ${ffmpegLog}\nsleep 600`),
+      restartDelayMs: 50,
+      onEvent,
+    })
+    await r.start(COMPANION)
+    await waitFor(() => events.some((e) => e.kind === "started"))
+    // "started" fires the instant Bun.spawn returns, racing the fake's own echo — give the
+    // shell a beat to flush the log before reading it.
+    await waitFor(() => existsSync(ffmpegLog) && readFileSync(ffmpegLog, "utf8").length > 0)
+    await r.stop()
+    const calls = await Bun.file(log).text()
+    expect(calls).toContain("forward tcp:27183 localabstract:android-cam")
+    expect(calls).toContain("am start-foreground-service")
+    // The forward lives in the adb server and outlives the TUI: left behind, anything that
+    // connects to 127.0.0.1:27183 makes the phone open its camera.
+    expect(calls).toContain("forward --remove tcp:27183")
+    // Proves command() picked the ffmpeg/companion args, not the scrcpy pair — a
+    // command() bug that returned buildArgs() here would still emit "started".
+    const ffmpegCalls = await Bun.file(ffmpegLog).text()
+    expect(ffmpegCalls).toContain("tcp://127.0.0.1:27183")
+    expect(ffmpegCalls).toContain(COMPANION.sink)
+    expect(r.state).toBe("stopped")
+  })
+
+  // The prep is three adb round-trips of awaits. Without an epoch re-check after them, a
+  // stop() landing mid-prep leaves ffmpeg spawned and holding the sink. Prep must succeed
+  // (slowly) here, not fail — a failing prep never reaches Bun.spawn regardless of the
+  // guard, which would make this test pass even with the guard deleted.
+  test("stop() during the prep never spawns ffmpeg", async () => {
+    const { events, onEvent } = collect()
+    const r = new StreamRunner({
+      adbPath: fakeScrcpy(`case "$*" in *"/proc/net/unix"*) sleep 0.3; ${UNIX_READY};; esac`),
+      ffmpegPath: fakeScrcpy("sleep 600"),
+      restartDelayMs: 50,
+      onEvent,
+    })
+    void r.start(COMPANION)
+    await sleep(150) // stop() lands while prep is still in flight, well before it resolves
+    await r.stop()
+    await sleep(600)
+    expect(events.filter((e) => e.kind === "started").length).toBe(0)
+    expect(r.state).toBe("stopped")
+  })
+
+  // Bun.spawn throws *synchronously* when the executable is missing. The doctor no longer
+  // guarantees ffmpeg exists here — the companion prerequisites only warn when some other
+  // phone works — so a bare spawn would reject `await this.spawn()` inside the unawaited
+  // `void this.onExit(null)` and surface as an unhandled rejection nobody can see.
+  test("a missing ffmpeg is reported through onEvent, not thrown out of spawn", async () => {
+    const { events, onEvent } = collect()
+    const r = new StreamRunner({
+      adbPath: fakeScrcpy(`case "$*" in *"/proc/net/unix"*) ${UNIX_READY};; esac`),
+      ffmpegPath: "/nonexistent/ffmpeg",
+      restartDelayMs: 20,
+      maxAttempts: 1,
+      onEvent,
+    })
+    await r.start(COMPANION)
+    await waitFor(() => events.some((e) => e.kind === "gave-up"))
+    await r.stop()
+    const exited = events.find((e) => e.kind === "exited") as Extract<StreamEvent, { kind: "exited" }>
+    expect(exited.reason).toContain("ffmpeg")
+    expect(events.map((e) => e.kind)).toContain("restarting")
+  })
+
+  // A phone still booting is exactly what retries are for, so a prep failure has to land in
+  // the same backoff path as a stream that died — not as an unhandled rejection.
+  test("a prep failure reports the reason and retries", async () => {
+    const { events, onEvent } = collect()
+    const r = new StreamRunner({
+      adbPath: fakeScrcpy(`case "$*" in *forward*) echo "error: device offline" >&2; exit 1;; esac`),
+      ffmpegPath: fakeScrcpy("sleep 600"),
+      restartDelayMs: 20,
+      maxAttempts: 1,
+      onEvent,
+    })
+    await r.start(COMPANION)
+    await waitFor(() => events.some((e) => e.kind === "gave-up"))
+    await r.stop()
+    const exited = events.find((e) => e.kind === "exited") as Extract<StreamEvent, { kind: "exited" }>
+    expect(exited.reason).toContain("device offline")
+    expect(events.map((e) => e.kind)).toContain("restarting")
   })
 })

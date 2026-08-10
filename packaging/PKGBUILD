@@ -7,7 +7,7 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/officialdad/android-cam-tui"
 license=('MIT')
 depends=('scrcpy>=3.0' 'android-tools' 'v4l-utils' 'v4l2loopback-dkms')
-optdepends=('ffmpeg: preview window'
+optdepends=('ffmpeg: companion backend for pre-Android-12 phones, and preview window'
             'mpv: preview window'
             'vlc: preview window'
             'android-udev: adb access without root')

@@ -15,12 +15,14 @@ bun test -t "auto-restarts"    # one test by name substring
 bun run src/index.tsx --doctor   # dependency report, no TUI
 ```
 
-Runtime deps outside the repo: `scrcpy` ≥ 3.0, `adb`, `v4l2-ctl` on PATH, and a
-v4l2loopback sink (`sudo modprobe v4l2loopback exclusive_caps=1 card_label="Phone Cam"`).
-The phone does **not** need unlocking: `--list-cameras` and camera capture both work
-through the keyguard with the screen off. Never wake or unlock it from code — waking a
-locked phone starts face unlock, which opens a camera of its own and pushes the device
-over the system-wide open-camera limit, so scrcpy's own open is rejected. That is what
+Runtime deps outside the repo: `scrcpy` ≥ 3.0, `adb`, `v4l2-ctl`, `ffmpeg` (companion
+backend only) on PATH, and a v4l2loopback sink (`sudo modprobe v4l2loopback
+exclusive_caps=1 card_label="Phone Cam"`). The phone does **not** need unlocking on
+either backend: `--list-cameras` and camera capture both work through the keyguard
+with the screen off, and `am start-foreground-service` leaves a locked phone locked
+too. Never wake or unlock it from code — waking a locked phone starts face unlock,
+which opens a camera of its own and pushes the device over the system-wide
+open-camera limit, so scrcpy's own open is rejected. That is what
 `StreamRunner.prepPhone()` used to do, and it turned every restart into a restart loop.
 
 ## Architecture
@@ -46,6 +48,8 @@ its **spawn wrapper**, and that split is the entire testing seam:
 | `parseDevices` | `listDevices`, `goWireless`, `goUsb` | `src/scrcpy/devices.ts` |
 | `buildArgs` | — | `src/config.ts` |
 | `checks`, `detectDistro`, `parseScrcpyVersion` | `probeEnv` | `src/doctor.ts` |
+| `parseCompanionState`, `socketReady` | `companionState`, `prepPhone`, `unforward` | `src/companion.ts` |
+| `ffmpegArgs` | — | `src/companion.ts` |
 
 Parsers are tested against text fixtures in `tests/fixtures/`. `StreamRunner` takes a
 `scrcpyPath` option so tests inject shell-script fakes (`fake-scrcpy.sh`, or one
@@ -82,6 +86,35 @@ there (a `block` check, `Bun.which`), so keep that guarantee if you move them.
 `adb`'s `-s <serial>` must precede the subcommand (`adb -s X shell ...`), and every
 scrcpy/adb call is serial-scoped so a USB and a wireless device can be attached at once.
 
+### Two backends
+
+`StreamConfig.backend` is derived from the phone's API level by `backendFor()` in
+`src/doctor.ts` and never read from the saved config — a config outlives the phone
+it was written for. Below `MIN_SDK` (31) `StreamRunner` preps the phone over adb
+instead of spawning scrcpy: `prepPhone()` forwards a port, starts `CamService` with
+`am start-foreground-service`, and polls `/proc/net/unix` for its socket before
+`ffmpeg` pipes the H.264 into the sink. The APK's capabilities are the
+`COMPANION_CAM` constant rather than a probe result — probing is the very thing
+that fails on these phones, and the APK has no control channel to honour the answer
+anyway. The `-r 30` before `-i` in `ffmpegArgs` is load-bearing: Annex-B carries no
+timestamps, so without it ffmpeg guesses the input rate and drops most frames
+converting down.
+
+`COMPANION_MIN_SDK` (26) is the floor under that floor: `am start-foreground-service`
+arrived in Android 8.0, so below it the APK installs and then never starts. The
+companion checks are **not** mutually exclusive with a usable modern handset the way
+`device-perms` and `device-auth` are — the backend is picked per selected device, so
+they warn when another phone works and block when none does. `stop()` removes the
+`adb forward`: it lives in the adb server and outlives the TUI, and anything that
+connects to that port makes the phone open its camera.
+
+The 1280x720@30 ceiling is scheduled, not permanent. `CamService.java` compiles
+`WIDTH`/`HEIGHT`/`FPS` in, and the host's only channel to it is
+`am start-foreground-service` plus a socket that starts carrying H.264 immediately —
+there is no request frame, so a size picker would list options the stream ignores.
+Lifting it means a connect handshake in the APK, which lives in the separate
+`android-cam` repo and is planned as its own cycle.
+
 ### StreamRunner epochs
 
 `src/scrcpy/runner.ts` supervises the stream and auto-restarts when Android kills the
@@ -90,6 +123,11 @@ camera. It `await`s the restart backoff, during which
 mechanism: capture `myEpoch` before an await, **re-check after every one**, bail if it
 moved. `stop()` bumps the epoch. Adding an await inside `start`/`onExit` without an
 epoch re-check reintroduces the double-spawn and stale-restart bugs the tests cover.
+
+`spawn()` follows the same rule for the companion path: it captures `myEpoch` before
+awaiting `prepPhone()` and re-checks after it. A prep failure does not reject
+`start()` — it routes into `onExit()` instead, so it inherits the same backoff as a
+mid-stream death rather than surfacing as an unhandled rejection.
 
 ### Keyboard: `useKeyboard` is global
 

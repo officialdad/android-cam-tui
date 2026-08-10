@@ -12,6 +12,11 @@ export interface StreamConfig {
   torch: boolean
   sink: string
   serial: string | null
+  /**
+   * Which stream path this phone needs. Derived from its API level by `reconcile()` and
+   * never trusted from the saved file — a config outlives the phone it was written for.
+   */
+  backend: "scrcpy" | "companion"
   orientation: (typeof ORIENTATIONS)[number]
   v4l2Buffer: number
 }
@@ -26,6 +31,7 @@ export const DEFAULT_CONFIG: StreamConfig = {
   torch: false,
   sink: "/dev/video3",
   serial: null,
+  backend: "scrcpy",
   orientation: "0",
   v4l2Buffer: 0,
 }

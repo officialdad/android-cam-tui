@@ -1,3 +1,4 @@
+import { ffmpegArgs, PORT, prepPhone, unforward } from "../companion"
 import { buildArgs, type StreamConfig } from "../config"
 
 export type StreamEvent =
@@ -12,6 +13,8 @@ export type RunnerState = "idle" | "running" | "restarting" | "stopped"
 
 interface RunnerOpts {
   scrcpyPath?: string
+  ffmpegPath?: string
+  adbPath?: string
   restartDelayMs?: number
   maxAttempts?: number
   onEvent: (e: StreamEvent) => void
@@ -43,12 +46,16 @@ export class StreamRunner {
   private lastLine: string | null = null
   private lastError: string | null = null
   private readonly scrcpyPath: string
+  private readonly ffmpegPath: string
+  private readonly adbPath: string
   private readonly restartDelayMs: number
   private readonly maxAttempts: number
   private readonly onEvent: (e: StreamEvent) => void
 
   constructor(opts: RunnerOpts) {
     this.scrcpyPath = opts.scrcpyPath ?? "scrcpy"
+    this.ffmpegPath = opts.ffmpegPath ?? "ffmpeg"
+    this.adbPath = opts.adbPath ?? "adb"
     this.restartDelayMs = opts.restartDelayMs ?? 2000
     this.maxAttempts = opts.maxAttempts ?? 6
     this.onEvent = opts.onEvent
@@ -73,7 +80,7 @@ export class StreamRunner {
     this.config = config
     this.attempt = 0
     this.epoch++ // supersede any restart still waiting out its backoff
-    this.spawn()
+    await this.spawn()
   }
 
   async restart(config: StreamConfig): Promise<void> {
@@ -90,18 +97,55 @@ export class StreamRunner {
       await this.proc.exited
       this.proc = null
     }
+    // Killing ffmpeg does not close the forward — that lives in the adb server and would
+    // outlive the TUI, leaving a port anything could connect to to make the phone stream.
+    // `unforward` swallows its own failures, so this cannot make stop() unreliable, and it
+    // has no place in the synchronous kill() hook, which cannot await.
+    if (this.config?.backend === "companion") await unforward(this.config.serial, this.adbPath)
   }
 
-  private spawn(): void {
+  /** `buildArgs` stays scrcpy-only; the companion path is a different program entirely. */
+  private command(): string[] {
+    return this.config.backend === "companion"
+      ? [this.ffmpegPath, ...ffmpegArgs(PORT, this.config.sink)]
+      : [this.scrcpyPath, ...buildArgs(this.config)]
+  }
+
+  /**
+   * The companion path needs three adb round-trips before ffmpeg exists, so this awaits.
+   * `myEpoch` is captured before that and re-checked after it: a `stop()` or a newer
+   * `start()` landing mid-prep must not leave a process holding the sink. `live.add` stays
+   * ahead of the await so a runner is always reachable by the exit hook.
+   */
+  private async spawn(): Promise<void> {
+    const myEpoch = this.epoch
     this.state = "running"
     this.startedAt = Date.now()
     this.lastLine = null
     this.lastError = null
     live.add(this)
-    this.proc = Bun.spawn([this.scrcpyPath, ...buildArgs(this.config)], {
-      stdout: "pipe",
-      stderr: "pipe",
-    })
+    try {
+      if (this.config.backend === "companion") {
+        await prepPhone(this.config.serial, this.adbPath)
+        if (this.epoch !== myEpoch) return
+      }
+      // Inside the try because `Bun.spawn` throws *synchronously* on a missing executable,
+      // and the doctor no longer proves ffmpeg is there: the companion prerequisites only
+      // warn when some other phone works, so the user can start past a yellow line. Bare,
+      // that throw rejects the unawaited `void this.onExit(null)` below — an unhandled
+      // rejection instead of a message.
+      this.proc = Bun.spawn(this.command(), {
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+    } catch (e) {
+      if (this.epoch !== myEpoch) return
+      // A phone still booting is what retries are for: report the cause and fall into the
+      // same backoff a mid-stream death takes, rather than rejecting out of start().
+      this.lastError = e instanceof Error ? e.message : String(e)
+      void this.onExit(null)
+      return
+    }
     this.onEvent({ kind: "started" })
     this.watch(this.proc.stdout as ReadableStream)
     this.watch(this.proc.stderr as ReadableStream)
@@ -150,6 +194,6 @@ export class StreamRunner {
     // Backoff: a config scrcpy rejects instantly would otherwise respawn twice a second forever.
     await new Promise((r) => setTimeout(r, Math.min(30_000, this.restartDelayMs * 2 ** (this.attempt - 1))))
     if (this.epoch !== myEpoch) return // stop() called, abort restart
-    this.spawn()
+    await this.spawn()
   }
 }

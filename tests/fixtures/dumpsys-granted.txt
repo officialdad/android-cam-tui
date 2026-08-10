@@ -1,0 +1,18 @@
+Activity Resolver Table:
+  Non-Data Actions:
+
+Packages:
+  Package [com.officialdad.androidcam] (5f3a1c2):
+    userId=10247
+    pkg=Package{5f3a1c2 com.officialdad.androidcam}
+    codePath=/data/app/com.officialdad.androidcam-1
+    versionCode=0 minSdk=21 targetSdk=32
+    flags=[ HAS_CODE ALLOW_CLEAR_USER_DATA ]
+    requested permissions:
+      android.permission.CAMERA
+      android.permission.FOREGROUND_SERVICE
+    install permissions:
+      android.permission.FOREGROUND_SERVICE: granted=true
+    User 0: ceDataInode=1441802 installed=true hidden=false
+      runtime permissions:
+        android.permission.CAMERA: granted=true, flags=[ USER_SET ]

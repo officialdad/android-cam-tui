@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useKeyboard, useTerminalDimensions } from "@opentui/react"
 import type { SelectOption } from "@opentui/core"
 import { buildArgs, loadConfig, ORIENTATIONS, type StreamConfig } from "../config"
-import { checks, probeEnv, MIN_SDK, type Check, type Env } from "../doctor"
+import { backendFor, checks, probeEnv, MIN_SDK, type Check, type Env } from "../doctor"
+import { COMPANION_CAM, ffmpegArgs, PORT } from "../companion"
 import { goUsb, goWireless, type DeviceInfo } from "../scrcpy/devices"
 import { probeCameras, type CameraInfo, type SinkInfo } from "../scrcpy/probe"
 import { Doctor } from "./doctor"
@@ -11,7 +12,18 @@ import { FilteredSelect, Stepper } from "./widgets"
 
 const FIELDS = ["device", "camera", "size", "fps", "zoom", "bitrate", "orientation", "buffer", "sink"] as const
 type Field = (typeof FIELDS)[number]
-const OUTPUT_FIELDS: Field[] = ["fps", "zoom", "bitrate", "orientation", "buffer", "sink"]
+// The "1 camera" and "2 resolution" panels own these; whatever fieldsFor(backend) leaves
+// is what belongs in the "3 output" box, so this is the only place that split is named.
+const PANEL_FIELDS: Field[] = ["device", "camera", "size"]
+
+/**
+ * The companion APK compiles camera, size, fps and bitrate in and has no control channel,
+ * so tab must not land on a stepper that cannot do anything. Camera and size stay: they are
+ * single-option and showing them is how the ceiling is visible.
+ */
+export function fieldsFor(backend: StreamConfig["backend"]): Field[] {
+  return backend === "companion" ? ["device", "camera", "size", "sink"] : [...FIELDS]
+}
 
 const BITRATES = ["4M", "8M", "16M", "24M", "32M"]
 const ZOOM_PRESETS = [0.5, 0.6, 0.8, 1, 1.5, 2, 3, 5, 10]
@@ -89,7 +101,12 @@ export const deviceLabel = (d: DeviceInfo) =>
  * name a camera, size or fps that this device does not have — after a device switch
  * it almost always does — so every dependent field is re-validated together.
  */
-export function reconcile(cfg: StreamConfig, cams: CameraInfo[], sinks: SinkInfo[]): StreamConfig {
+export function reconcile(
+  cfg: StreamConfig,
+  cams: CameraInfo[],
+  sinks: SinkInfo[],
+  sdk?: number,
+): StreamConfig {
   const cam = cams.find((c) => c.id === cfg.cameraId) ?? cams[0]
   const zoomOk = cfg.zoom !== null && cam.zoomRange && cfg.zoom >= cam.zoomRange[0] && cfg.zoom <= cam.zoomRange[1]
   const all = camSizes(cam)
@@ -108,8 +125,13 @@ export function reconcile(cfg: StreamConfig, cams: CameraInfo[], sinks: SinkInfo
     highSpeed: stop?.highSpeed ?? false,
     zoom: zoomOk ? cfg.zoom : null,
     sink: sinks.find((s) => s.path === cfg.sink)?.path ?? sinks[0]?.path ?? cfg.sink,
+    backend: backendFor(sdk),
   }
 }
+
+/** Read off COMPANION_CAM, not retyped: the control-channel cycle makes it a probe result. */
+export const companionCeiling = () =>
+  `companion backend — ${COMPANION_CAM.maxSize}@${COMPANION_CAM.fps[0]} fixed, no zoom or torch`
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -166,7 +188,12 @@ export function Setup(props: {
         env.devices.find((d) => d.state === "device") ??
         env.devices[0]
       const serial = pick?.serial ?? null
-      const cams = await probesRef.current.getCameras(serial)
+      // Asking scrcpy to list cameras on a pre-12 phone is the very thing that fails on the
+      // ROMs this path exists for, and the APK would ignore the answer anyway.
+      const cams =
+        backendFor(pick?.sdk) === "companion"
+          ? [COMPANION_CAM]
+          : await probesRef.current.getCameras(serial)
       if (cams.length === 0) {
         // Routed through Doctor so the `scrcpy-version` warning rides along: "no cameras"
         // plus "you are on scrcpy 2.1" is the actual diagnosis, and `r` comes for free.
@@ -180,7 +207,7 @@ export function Setup(props: {
         return
       }
       setCameras(cams)
-      setConfig(reconcile({ ...cfg, serial }, cams, env.sinks))
+      setConfig(reconcile({ ...cfg, serial }, cams, env.sinks, pick?.sdk))
     } catch (e) {
       setCheckList([...list, blocker("preflight", `preflight failed: ${errMsg(e)}`, [])])
     } finally {
@@ -196,14 +223,16 @@ export function Setup(props: {
     if (!config) return
     setBusy(true)
     setNotice(null)
+    const dev = devices.find((d) => d.serial === serial)
     try {
-      const cams = await probesRef.current.getCameras(serial)
+      const cams =
+        backendFor(dev?.sdk) === "companion" ? [COMPANION_CAM] : await probesRef.current.getCameras(serial)
       if (cams.length === 0) {
         setNotice(`no cameras on ${serial}`)
         return
       }
       setCameras(cams)
-      setConfig(reconcile({ ...config, serial }, cams, sinks))
+      setConfig(reconcile({ ...config, serial }, cams, sinks, dev?.sdk))
     } catch (e) {
       setNotice(errMsg(e))
     } finally {
@@ -258,12 +287,14 @@ export function Setup(props: {
     if (blocked) return
     if (capturing.current) return // a filter query is being typed — don't steal the keystrokes
     if (key.name === "tab") {
+      const fields = fieldsFor(config?.backend ?? "scrcpy")
       const step = key.shift ? -1 : 1
-      setField((f) => FIELDS[(FIELDS.indexOf(f) + step + FIELDS.length) % FIELDS.length])
+      setField((f) => fields[(fields.indexOf(f) + step + fields.length) % fields.length])
     }
     if (key.name === "1") setField("camera")
     if (key.name === "2") setField("size")
-    if (key.name === "3") setField("fps")
+    // Companion has no fps stepper to land on — see fieldsFor.
+    if (key.name === "3" && fieldsFor(config?.backend ?? "scrcpy").includes("fps")) setField("fps")
     if (key.name === "w" && !busy) void toggleTransport()
     if (key.name === "return" && config && !busy) props.onStart(config)
   })
@@ -290,7 +321,12 @@ export function Setup(props: {
   const sinkLabel = sinks.find((s) => s.path === config.sink)?.label
   const deviceList = devices.length > 0 ? devices : [{ serial: config.serial ?? "?", model: "", wireless: false, state: "device" }]
   const currentDevice = deviceList.find((d) => d.serial === config.serial)
-  const outputFocused = OUTPUT_FIELDS.includes(field)
+  const currentSdk = currentDevice?.sdk
+  const companion = config.backend === "companion"
+  // Derived from fieldsFor rather than a second hardcoded list, so a field that stops
+  // being valid for this backend (a device switch, not just a keypress) also stops
+  // being able to hold the output box open with nothing in it focused.
+  const outputFocused = fieldsFor(config.backend).includes(field) && !PANEL_FIELDS.includes(field)
 
   return (
     <box
@@ -328,7 +364,7 @@ export function Setup(props: {
             onCaptureChange={(c) => (capturing.current = c)}
             onChange={(v) => {
               const next = cameras.find((c) => c.id === v)!
-              setConfig(reconcile({ ...config, cameraId: next.id, zoom: null }, cameras, sinks))
+              setConfig(reconcile({ ...config, cameraId: next.id, zoom: null }, cameras, sinks, currentSdk))
             }}
           />
         )}
@@ -340,7 +376,7 @@ export function Setup(props: {
             value={config.size}
             onCaptureChange={(c) => (capturing.current = c)}
             // A high-speed-only size cannot keep a normal fps (or the reverse), so re-snap.
-            onChange={(v) => setConfig(reconcile({ ...config, size: v }, cameras, sinks))}
+            onChange={(v) => setConfig(reconcile({ ...config, size: v }, cameras, sinks, currentSdk))}
           />
         )}
         {(wide || outputFocused) && (
@@ -355,43 +391,50 @@ export function Setup(props: {
               width: wide ? 34 : "100%",
             }}
           >
-            <Stepper
-              label="fps"
-              focused={field === "fps"}
-              options={stops.map(fpsLabel)}
-              index={Math.max(0, stops.findIndex((s) => s.fps === config.fps && s.highSpeed === config.highSpeed))}
-              onChange={(i) => setConfig({ ...config, fps: stops[i].fps, highSpeed: stops[i].highSpeed })}
-            />
-            <Stepper
-              label="zoom"
-              bar
-              focused={field === "zoom"}
-              options={zooms.map(zoomLabel)}
-              index={Math.max(0, zooms.indexOf(config.zoom))}
-              onChange={(i) => setConfig({ ...config, zoom: zooms[i] })}
-            />
-            <Stepper
-              label="bitrate"
-              focused={field === "bitrate"}
-              options={bitrates}
-              index={Math.max(0, bitrates.indexOf(config.bitrate))}
-              onChange={(i) => setConfig({ ...config, bitrate: bitrates[i] })}
-            />
-            <Stepper
-              label="rotate"
-              compact
-              focused={field === "orientation"}
-              options={ORIENTATIONS.map((o) => ORIENT_LABELS[o])}
-              index={Math.max(0, ORIENTATIONS.indexOf(config.orientation))}
-              onChange={(i) => setConfig({ ...config, orientation: ORIENTATIONS[i] })}
-            />
-            <Stepper
-              label="buffer"
-              focused={field === "buffer"}
-              options={BUFFERS.map((b) => (b === 0 ? "off" : String(b)))}
-              index={Math.max(0, BUFFERS.indexOf(config.v4l2Buffer))}
-              onChange={(i) => setConfig({ ...config, v4l2Buffer: BUFFERS[i] })}
-            />
+            {!companion && (
+              <>
+                <Stepper
+                  label="fps"
+                  focused={field === "fps"}
+                  options={stops.map(fpsLabel)}
+                  index={Math.max(
+                    0,
+                    stops.findIndex((s) => s.fps === config.fps && s.highSpeed === config.highSpeed),
+                  )}
+                  onChange={(i) => setConfig({ ...config, fps: stops[i].fps, highSpeed: stops[i].highSpeed })}
+                />
+                <Stepper
+                  label="zoom"
+                  bar
+                  focused={field === "zoom"}
+                  options={zooms.map(zoomLabel)}
+                  index={Math.max(0, zooms.indexOf(config.zoom))}
+                  onChange={(i) => setConfig({ ...config, zoom: zooms[i] })}
+                />
+                <Stepper
+                  label="bitrate"
+                  focused={field === "bitrate"}
+                  options={bitrates}
+                  index={Math.max(0, bitrates.indexOf(config.bitrate))}
+                  onChange={(i) => setConfig({ ...config, bitrate: bitrates[i] })}
+                />
+                <Stepper
+                  label="rotate"
+                  compact
+                  focused={field === "orientation"}
+                  options={ORIENTATIONS.map((o) => ORIENT_LABELS[o])}
+                  index={Math.max(0, ORIENTATIONS.indexOf(config.orientation))}
+                  onChange={(i) => setConfig({ ...config, orientation: ORIENTATIONS[i] })}
+                />
+                <Stepper
+                  label="buffer"
+                  focused={field === "buffer"}
+                  options={BUFFERS.map((b) => (b === 0 ? "off" : String(b)))}
+                  index={Math.max(0, BUFFERS.indexOf(config.v4l2Buffer))}
+                  onChange={(i) => setConfig({ ...config, v4l2Buffer: BUFFERS[i] })}
+                />
+              </>
+            )}
             <Stepper
               label="sink"
               compact
@@ -404,7 +447,12 @@ export function Setup(props: {
           </box>
         )}
       </box>
-      <text fg="#888">scrcpy {buildArgs(config).join(" ")}</text>
+      {companion && <text fg="yellow">{companionCeiling()}</text>}
+      <text fg="#888">
+        {companion
+          ? `ffmpeg ${ffmpegArgs(PORT, config.sink).join(" ")}`
+          : `scrcpy ${buildArgs(config).join(" ")}`}
+      </text>
       <text fg="cyan">↹ next · ⇧↹ prev · 1-3 jump · / filter · ↑↓ pick · ←→ adjust · w usb/wifi · ⏎ start</text>
     </box>
   )

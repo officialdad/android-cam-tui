@@ -48,11 +48,13 @@ const OK: Env = {
   scrcpy: "/usr/bin/scrcpy",
   adb: "/usr/bin/adb",
   v4l2ctl: "/usr/bin/v4l2-ctl",
+  ffmpeg: "/usr/bin/ffmpeg",
   player: "/usr/bin/mpv",
   scrcpyVersion: [4, 1],
   sinks: [{ label: "Phone Cam", path: "/dev/video3" }],
   devices: [{ serial: "R5CT", model: "SM_S911B", wireless: false, state: "device" }],
   distro: "arch",
+  apkPath: "~/.cache/android-cam-tui/android-cam.apk",
 }
 
 const failed = (env: Env) => checks(env).filter((c) => !c.ok).map((c) => c.id)
@@ -113,24 +115,111 @@ describe("checks", () => {
     }
   })
 
-  // `--list-cameras` answers on Android 10, so this phone looks healthy right up to the
-  // moment capture starts and dies with "Server connection failed". Block it in the doctor.
-  test("a phone below Android 12 blocks on its own check", () => {
-    const devices: DeviceInfo[] = [{ serial: "e410cff1", model: "CPH1931", wireless: false, state: "device", sdk: 29 }]
+  // Android 10 answers `--list-cameras` fine and only dies once capture starts, so this
+  // used to be a hard block. The companion APK serves it instead; what the doctor reports
+  // now is what that path still needs.
+  const READY: DeviceInfo = {
+    serial: "e410cff1",
+    model: "CPH1931",
+    wireless: false,
+    state: "device",
+    sdk: 29,
+    companion: { installed: true, granted: true },
+  }
+
+  test("an old phone with the companion app ready blocks on nothing", () => {
+    expect(blocked({ ...OK, devices: [READY] })).toEqual([])
+  })
+
+  test("an old phone with no companion app blocks on the install", () => {
+    const devices = [{ ...READY, companion: { installed: false, granted: false } }]
+    expect(blocked({ ...OK, devices })).toEqual(["companion-apk"])
+    expect(find({ ...OK, devices }, "companion-apk").fix.join("\n")).toContain("adb install -r -g")
+  })
+
+  // The grant is a separate failure with a separate remedy, and firing both at once would
+  // have the user install an app that is already installed.
+  test("an installed but ungranted app blocks on the permission alone", () => {
+    const devices = [{ ...READY, companion: { installed: true, granted: false } }]
+    expect(blocked({ ...OK, devices })).toEqual(["companion-perm"])
+    expect(find({ ...OK, devices }, "companion-perm").fix.join("\n")).toContain("pm grant")
+  })
+
+  test("the companion path blocks without ffmpeg, and only for an old phone", () => {
+    expect(blocked({ ...OK, ffmpeg: null, devices: [READY] })).toEqual(["ffmpeg"])
+    expect(blocked({ ...OK, ffmpeg: null })).toEqual([])
+  })
+
+  test("a modern phone raises no companion checks at all", () => {
+    const devices: DeviceInfo[] = [{ serial: "NEW", model: "", wireless: false, state: "device", sdk: 34 }]
+    expect(blocked({ ...OK, ffmpeg: null, devices })).toEqual([])
+  })
+
+  // Backend selection is per selected device, not per fleet: a modern sibling does not make
+  // the old phone streamable, it only means the user is not stuck. So the prerequisites are
+  // still reported — as warnings — rather than going silent and failing 90 seconds later.
+  const MODERN: DeviceInfo = { serial: "NEW", model: "", wireless: false, state: "device", sdk: 34 }
+
+  test("a modern sibling downgrades the companion checks to warnings, not silence", () => {
+    const devices: DeviceInfo[] = [{ ...READY, companion: { installed: false, granted: false } }, MODERN]
+    const env = { ...OK, ffmpeg: null, devices }
+    expect(blocked(env)).toEqual([])
+    expect(failed(env)).toEqual(["ffmpeg", "companion-apk"])
+  })
+
+  test("with no modern sibling the same environment blocks", () => {
+    const devices: DeviceInfo[] = [{ ...READY, companion: { installed: false, granted: false } }]
+    expect(blocked({ ...OK, ffmpeg: null, devices })).toEqual(["ffmpeg", "companion-apk"])
+  })
+
+  // `am start-foreground-service` landed in Android 8.0, so the companion path has a floor
+  // of its own. Below it nothing installs its way out, and telling the user to install the
+  // APK would be advice that cannot work.
+  test("a phone below the companion floor blocks on the floor alone", () => {
+    const devices = [{ ...READY, sdk: 23, companion: { installed: false, granted: false } }]
     expect(blocked({ ...OK, devices })).toEqual(["device-android"])
-    expect(find({ ...OK, devices }, "device-android").detail).toContain("29")
+    const fix = find({ ...OK, devices }, "device-android").fix.join("\n")
+    expect(fix).toContain("Android 8")
+    expect(fix).not.toContain("adb install")
+  })
+
+  // Two old phones do not share a verdict either. The sub-8 handset is a dead end, the
+  // Android 10 one is exactly what the companion path is for, and each check names its own
+  // API level — so both are reported and neither describes the other's phone.
+  test("an all-old fleet reports the floor and the companion prerequisites separately", () => {
+    const devices = [
+      { ...READY, serial: "ANCIENT", sdk: 23, companion: { installed: false, granted: false } },
+      { ...READY, companion: { installed: false, granted: false } },
+    ]
+    expect(blocked({ ...OK, devices })).toEqual(["device-android", "companion-apk"])
+    expect(find({ ...OK, devices }, "device-android").detail).toContain("API 23")
+    expect(find({ ...OK, devices }, "companion-apk").detail).toContain("API 29")
+  })
+
+  // ...and once that Android 10 phone is actually serviceable it is a working handset, so
+  // the dead-end sibling drops to a warning rather than locking the user out of it.
+  test("a companion-ready phone keeps an ancient sibling from blocking the screen", () => {
+    const devices = [{ ...READY, serial: "ANCIENT", sdk: 23 }, READY]
+    expect(blocked({ ...OK, devices })).toEqual([])
+    expect(failed({ ...OK, devices })).toEqual(["device-android"])
+  })
+
+  test("api 26 exactly is served by the companion path, not the floor block", () => {
+    const devices = [{ ...READY, sdk: 26 }]
+    expect(blocked({ ...OK, devices })).toEqual([])
+  })
+
+  test("the apk fix names the cache path, and falls back when the write failed", () => {
+    const devices = [{ ...READY, companion: { installed: false, granted: false } }]
+    expect(find({ ...OK, devices }, "companion-apk").fix.join("\n")).toContain(
+      "~/.cache/android-cam-tui/android-cam.apk",
+    )
+    const fix = find({ ...OK, devices, apkPath: null }, "companion-apk").fix.join("\n")
+    expect(fix).toContain("github.com/officialdad/android-cam")
   })
 
   test("an unknown sdk is not treated as too old", () => {
     expect(blocked(OK)).toEqual([])
-  })
-
-  test("one modern phone clears the android check for an old sibling", () => {
-    const devices: DeviceInfo[] = [
-      { serial: "OLD", model: "", wireless: false, state: "device", sdk: 29 },
-      { serial: "NEW", model: "", wireless: false, state: "device", sdk: 34 },
-    ]
-    expect(blocked({ ...OK, devices })).toEqual([])
   })
 
   test("one usable device clears every device check", () => {
@@ -199,6 +288,7 @@ describe("fixScript", () => {
     scrcpy: null,
     adb: null,
     v4l2ctl: null,
+    ffmpeg: null,
     player: null,
     scrcpyVersion: [2, 1],
     sinks: [],

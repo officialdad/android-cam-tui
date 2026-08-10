@@ -2,19 +2,21 @@ import { describe, expect, mock, test } from "bun:test"
 import { act } from "react"
 import { testRender } from "@opentui/react/test-utils"
 import type { StreamConfig } from "../src/config"
-import { checks, type Env } from "../src/doctor"
+import { checks, MIN_SDK, type Env } from "../src/doctor"
 import type { CameraInfo } from "../src/scrcpy/probe"
-import { Setup } from "../src/ui/setup"
+import { companionCeiling, Setup } from "../src/ui/setup"
 
 const HEALTHY: Env = {
   scrcpy: "/usr/bin/scrcpy",
   adb: "/usr/bin/adb",
   v4l2ctl: "/usr/bin/v4l2-ctl",
+  ffmpeg: "/usr/bin/ffmpeg",
   player: "/usr/bin/mpv",
   scrcpyVersion: [4, 1],
   sinks: [{ label: "Phone Cam", path: "/dev/video3" }],
   devices: [{ serial: "R5CT", model: "SM_S911B", wireless: false, state: "device" }],
   distro: "debian",
+  apkPath: null,
 }
 
 /** A fresh Ubuntu box that just ran the curl installer: nothing else is there yet. */
@@ -23,6 +25,7 @@ const BARE: Env = {
   scrcpy: null,
   adb: null,
   v4l2ctl: null,
+  ffmpeg: null,
   player: null,
   scrcpyVersion: null,
   sinks: [],
@@ -234,5 +237,89 @@ describe("Setup → Doctor", () => {
     } finally {
       mock.restore()
     }
+  })
+})
+
+describe("Setup → companion backend", () => {
+  // Below MIN_SDK with the app already installed and granted, so no doctor block fires
+  // and the screen under test is Setup, not <Doctor>.
+  const COMPANION_ENV: Env = {
+    ...HEALTHY,
+    devices: [
+      {
+        serial: "OLDPHONE",
+        model: "SM_G900",
+        wireless: false,
+        state: "device",
+        sdk: MIN_SDK - 2,
+        companion: { installed: true, granted: true },
+      },
+    ],
+  }
+
+  /**
+   * Same shape as `render()` above, but `cameras` is a `mock()` so a test can assert it was
+   * never called — the companion path must never probe, that is the entire point of it.
+   */
+  async function renderCompanion(onStart: (c: StreamConfig) => void = () => {}, width = 80, height = 30) {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const getCameras = mock(async () => CAMERAS)
+    const probes = {
+      cameras: getCameras,
+      env: async () => {
+        await gate
+        return COMPANION_ENV
+      },
+    }
+    const t = await testRender(<Setup onStart={onStart} probes={probes} />, { width, height })
+    await act(async () => {
+      release()
+    })
+    await pollFrame(t, (frame) => !frame.includes("Probing phone cameras…"))
+    return { t, getCameras }
+  }
+
+  test("renders Setup (not Doctor), the ffmpeg preview and the ceiling line, without probing cameras", async () => {
+    // Wide enough that every panel is rendered regardless of focus, so this checks what the
+    // companion path ever draws — not just what the default-focused field happens to show.
+    const { t, getCameras } = await renderCompanion(undefined, 110, 30)
+    const frame = t.captureCharFrame()
+
+    expect(frame).toContain("android-cam-tui — setup")
+    expect(frame).not.toContain("missing dependencies")
+    expect(frame).toContain(companionCeiling())
+    expect(frame).toContain("ffmpeg -hide_banner")
+    // The full ffmpeg line wraps across the box at this width, so PORT is checked as its
+    // own substring rather than as part of the unbroken "tcp://127.0.0.1:27183".
+    expect(frame).toContain("27183")
+    expect(frame).not.toContain("scrcpy --video-source=camera")
+
+    // The guarded steppers never render on this path. "bitrate"/"rotate" are stepper labels
+    // used nowhere else on this screen. "buffer" also shows up inside the ffmpeg preview's
+    // "-fflags nobuffer" flag, so its stepper is checked by its padded label instead; "zoom"
+    // appears in the ceiling sentence above, so it is ruled out by its bar glyph, which
+    // nothing else on this screen draws.
+    expect(frame).not.toContain("bitrate")
+    expect(frame).not.toContain("rotate")
+    expect(frame).not.toContain("buffer  ‹") // the buffer stepper's padded label + selection
+    expect(frame).not.toContain("├") // the zoom stepper's bar track
+
+    expect(getCameras).not.toHaveBeenCalled()
+  })
+
+  // Regression for the `3`-key fix: fieldsFor("companion") has no "fps", so `3` must not
+  // move focus there. At this width the camera panel is only drawn while it is focused, so
+  // a wrongly-accepted jump makes it vanish — asserted on rendered content, not color.
+  test("3 does not move focus onto the fps field the companion path has no widget for", async () => {
+    const { t } = await renderCompanion()
+    expect(t.captureCharFrame()).toContain("1 camera")
+
+    await act(async () => {
+      t.mockInput.pressKey("3")
+    })
+    await t.flush()
+
+    expect(t.captureCharFrame()).toContain("1 camera")
   })
 })

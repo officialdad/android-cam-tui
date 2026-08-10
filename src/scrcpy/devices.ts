@@ -1,3 +1,5 @@
+import type { CompanionState } from "../companion"
+
 export interface DeviceInfo {
   serial: string
   model: string
@@ -5,6 +7,8 @@ export interface DeviceInfo {
   state: string
   /** `ro.build.version.sdk`. Undefined when the device is not reachable enough to ask. */
   sdk?: number
+  /** Only filled for phones below MIN_SDK — nothing else needs the companion app. */
+  companion?: CompanionState
 }
 
 const WIRELESS_RE = /^\d{1,3}(?:\.\d{1,3}){3}:\d+$/
@@ -27,7 +31,7 @@ export function parseDevices(text: string): DeviceInfo[] {
   return devices
 }
 
-async function adb(cmd: string[]): Promise<{ out: string; code: number }> {
+export async function adb(cmd: string[]): Promise<{ out: string; code: number }> {
   let proc: Bun.Subprocess
   try {
     proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" })
