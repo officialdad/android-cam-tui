@@ -129,6 +129,10 @@ export function reconcile(
   }
 }
 
+/** Read off COMPANION_CAM, not retyped: the control-channel cycle makes it a probe result. */
+export const companionCeiling = () =>
+  `companion backend — ${COMPANION_CAM.maxSize}@${COMPANION_CAM.fps[0]} fixed, no zoom or torch`
+
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 /**
@@ -443,7 +447,7 @@ export function Setup(props: {
           </box>
         )}
       </box>
-      {companion && <text fg="yellow">companion backend — 1280x720@30 fixed, no zoom or torch</text>}
+      {companion && <text fg="yellow">{companionCeiling()}</text>}
       <text fg="#888">
         {companion
           ? `ffmpeg ${ffmpegArgs(PORT, config.sink).join(" ")}`

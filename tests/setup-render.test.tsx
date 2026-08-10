@@ -4,7 +4,7 @@ import { testRender } from "@opentui/react/test-utils"
 import type { StreamConfig } from "../src/config"
 import { checks, MIN_SDK, type Env } from "../src/doctor"
 import type { CameraInfo } from "../src/scrcpy/probe"
-import { Setup } from "../src/ui/setup"
+import { companionCeiling, Setup } from "../src/ui/setup"
 
 const HEALTHY: Env = {
   scrcpy: "/usr/bin/scrcpy",
@@ -288,7 +288,7 @@ describe("Setup → companion backend", () => {
 
     expect(frame).toContain("android-cam-tui — setup")
     expect(frame).not.toContain("missing dependencies")
-    expect(frame).toContain("companion backend — 1280x720@30 fixed, no zoom or torch")
+    expect(frame).toContain(companionCeiling())
     expect(frame).toContain("ffmpeg -hide_banner")
     // The full ffmpeg line wraps across the box at this width, so PORT is checked as its
     // own substring rather than as part of the unbroken "tcp://127.0.0.1:27183".

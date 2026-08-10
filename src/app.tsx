@@ -7,24 +7,21 @@ import { listDevices, type DeviceInfo } from "./scrcpy/devices"
 import { probeCameras, type CameraInfo } from "./scrcpy/probe"
 import { StreamRunner, type StreamEvent } from "./scrcpy/runner"
 import { Dashboard, eventToLog, type LogLine } from "./ui/dashboard"
-import { nextStop, Setup, zoomStops } from "./ui/setup"
+import { nextStop, reconcile, Setup, zoomStops } from "./ui/setup"
 
 /**
  * What `--start` must hand to `start()` for the phone actually attached. `--start` skips
- * the setup screen, so nothing has run `reconcile()` — a config saved during a scrcpy
- * session names a size and fps the companion APK compiles in and ignores entirely, so a
- * switch to the companion backend has to snap those two fields (and highSpeed, which the
- * APK has no such session for) onto `COMPANION_CAM` here, the same place the backend
- * itself gets re-derived. Exported so the snap is testable without rendering the app.
+ * the setup screen, so nothing has run `reconcile()` — and a config saved during a scrcpy
+ * session names a camera, size and fps the companion APK compiles in and ignores. Snapping
+ * them here by hand would re-derive reconcile's job and still leave cameraId and zoom
+ * stale, so the companion branch routes through `reconcile()` itself against the one
+ * camera that path has. `sinks: []` preserves the saved sink. Exported so the snap is
+ * testable without rendering the app.
  */
 export function autoStartConfig(cfg: StreamConfig, dev: DeviceInfo | undefined): StreamConfig {
+  const next = { ...cfg, serial: dev?.serial ?? cfg.serial }
   const backend = backendFor(dev?.sdk)
-  return {
-    ...cfg,
-    serial: dev?.serial ?? cfg.serial,
-    backend,
-    ...(backend === "companion" && { size: COMPANION_CAM.maxSize, fps: COMPANION_CAM.fps[0], highSpeed: false }),
-  }
+  return backend === "companion" ? reconcile(next, [COMPANION_CAM], [], dev?.sdk) : { ...next, backend }
 }
 
 export function App(props: { onQuit: () => void; autoStart?: boolean }) {
