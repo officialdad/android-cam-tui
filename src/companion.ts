@@ -1,4 +1,6 @@
+import apk from "./android-cam.apk" with { type: "file" }
 import type { CameraInfo } from "./scrcpy/probe"
+import { adb } from "./scrcpy/devices"
 
 export const PKG = "com.officialdad.androidcam"
 export const SOCKET = "android-cam"
@@ -71,4 +73,59 @@ export function ffmpegArgs(port: number, sink: string): string[] {
     "v4l2",
     sink,
   ]
+}
+
+/**
+ * Tilde, not $HOME expanded: this string goes into a doctor fix line, and the doctor
+ * indents those by two inside a bordered box, so an expanded path on a long username
+ * blows the 76-column budget and the user pastes a broken command.
+ */
+export const APK_CACHE = "~/.cache/android-cam-tui/android-cam.apk"
+
+const expand = (p: string) => p.replace(/^~/, process.env.HOME ?? "~")
+
+/**
+ * The imported path addresses Bun's embedded filesystem inside a compiled binary, which
+ * `adb install` — a subprocess — cannot open. Write the bytes somewhere real first.
+ */
+export async function materializeApk(dest = APK_CACHE): Promise<string | null> {
+  try {
+    await Bun.write(expand(dest), Bun.file(apk)) // Bun.write creates parent dirs
+    return dest
+  } catch {
+    return null
+  }
+}
+
+export async function companionState(serial: string, adbPath = "adb"): Promise<CompanionState> {
+  try {
+    const { out } = await adb([adbPath, "-s", serial, "shell", "dumpsys", "package", PKG])
+    return parseCompanionState(out)
+  } catch {
+    return { installed: false, granted: false } // no adb — that has its own doctor check
+  }
+}
+
+/**
+ * Forward the port, start the service, wait for its socket. Never starts an activity:
+ * `am start-foreground-service` leaves a locked phone locked, and waking it would start
+ * face unlock, which opens a camera of its own and pushes the device past the
+ * system-wide open-camera limit so our own open is rejected.
+ */
+export async function prepPhone(serial: string | null, adbPath = "adb", tries = 30): Promise<void> {
+  const base = serial ? [adbPath, "-s", serial] : [adbPath]
+  // Idempotent, so it is re-run on every spawn rather than tracked and torn down.
+  const fwd = await adb([...base, "forward", `tcp:${PORT}`, `localabstract:${SOCKET}`])
+  if (fwd.code !== 0) throw new Error(fwd.out.trim() || "adb forward failed")
+  await adb([...base, "shell", "am", "start-foreground-service", "-n", `${PKG}/.CamService`])
+  // The service binds its socket a beat after the process starts; racing ffmpeg against
+  // it just fails.
+  for (let i = 0; i < tries; i++) {
+    const { out } = await adb([...base, "shell", "cat", "/proc/net/unix"])
+    if (socketReady(out)) return
+    await Bun.sleep(200)
+  }
+  throw new Error(
+    `Android Cam never listened — grant it the camera: adb shell pm grant ${PKG} android.permission.CAMERA`,
+  )
 }

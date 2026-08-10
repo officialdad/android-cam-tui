@@ -73,3 +73,78 @@ describe("COMPANION_CAM", () => {
     expect(COMPANION_CAM.zoomRange).toBeNull()
   })
 })
+
+import { mkdtempSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { companionState, materializeApk, prepPhone } from "../src/companion"
+
+/**
+ * A fake adb that answers by subcommand. Written to a tmpdir per test because env vars do
+ * not reach spawned children here — the behaviour is baked into the script instead.
+ */
+function fakeAdb(body: string) {
+  const bin = join(mkdtempSync(join(tmpdir(), "adb-")), "adb")
+  writeFileSync(bin, `#!/bin/sh\n${body}\n`, { mode: 0o755 })
+  return bin
+}
+
+const DUMPSYS_GRANTED = `cat ${import.meta.dir}/fixtures/dumpsys-granted.txt`
+const UNIX_READY = `cat ${import.meta.dir}/fixtures/proc-net-unix-ready.txt`
+const UNIX_COLD = `cat ${import.meta.dir}/fixtures/proc-net-unix-cold.txt`
+
+describe("companionState", () => {
+  test("reads the phone's install state through adb", async () => {
+    const bin = fakeAdb(DUMPSYS_GRANTED)
+    expect(await companionState("R5CT", bin)).toEqual({ installed: true, granted: true })
+  })
+
+  test("an adb that is not there reports not installed rather than throwing", async () => {
+    expect(await companionState("R5CT", "/nonexistent/adb")).toEqual({
+      installed: false,
+      granted: false,
+    })
+  })
+})
+
+describe("prepPhone", () => {
+  // Every adb call is serial-scoped, and `-s <serial>` has to precede the subcommand.
+  test("forwards the port and starts the service before the socket poll", async () => {
+    const log = join(mkdtempSync(join(tmpdir(), "adblog-")), "calls")
+    const bin = fakeAdb(`echo "$@" >> ${log}\ncase "$*" in *"/proc/net/unix"*) ${UNIX_READY};; esac`)
+    await prepPhone("R5CT", bin)
+    const calls = await Bun.file(log).text()
+    expect(calls).toContain("-s R5CT forward tcp:27183 localabstract:android-cam")
+    expect(calls).toContain("-s R5CT shell am start-foreground-service -n com.officialdad.androidcam/.CamService")
+    // No activity is ever started: waking a locked phone starts face unlock, which opens a
+    // camera of its own and gets our own open rejected.
+    expect(calls).not.toContain("am start -n")
+  })
+
+  test("throws with the permission hint when the service never listens", async () => {
+    const bin = fakeAdb(`case "$*" in *"/proc/net/unix"*) ${UNIX_COLD};; esac`)
+    expect(prepPhone("R5CT", bin, 2)).rejects.toThrow(/pm grant/)
+  })
+
+  test("a failed forward is reported rather than swallowed", async () => {
+    const bin = fakeAdb(`case "$*" in *forward*) echo "error: device offline" >&2; exit 1;; esac`)
+    expect(prepPhone("R5CT", bin)).rejects.toThrow(/device offline/)
+  })
+})
+
+describe("materializeApk", () => {
+  // The imported path addresses Bun's embedded filesystem in a compiled binary, which adb
+  // cannot open. This is what turns it into a real one.
+  test("writes a real, non-empty apk adb could install", async () => {
+    const dest = join(mkdtempSync(join(tmpdir(), "apk-")), "android-cam.apk")
+    expect(await materializeApk(dest)).toBe(dest)
+    expect(Bun.file(dest).size).toBeGreaterThan(4096)
+    // Every APK is a zip.
+    const head = new Uint8Array(await Bun.file(dest).slice(0, 2).arrayBuffer())
+    expect([head[0], head[1]]).toEqual([0x50, 0x4b])
+  })
+
+  test("an unwritable destination yields null rather than throwing", async () => {
+    expect(await materializeApk("/proc/nope/android-cam.apk")).toBeNull()
+  })
+})

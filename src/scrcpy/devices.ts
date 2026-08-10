@@ -27,7 +27,7 @@ export function parseDevices(text: string): DeviceInfo[] {
   return devices
 }
 
-async function adb(cmd: string[]): Promise<{ out: string; code: number }> {
+export async function adb(cmd: string[]): Promise<{ out: string; code: number }> {
   let proc: Bun.Subprocess
   try {
     proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" })
