@@ -12,6 +12,12 @@ export interface CameraInfo {
    * never reports it. Used to pre-select the rotate option instead of making the user guess.
    */
   orientation?: number
+  /**
+   * LENS_INFO_MINIMUM_FOCUS_DISTANCE in diopters, companion probe only — the closest the
+   * lens focuses, so the upper bound for a fixed-focus pick. Absent: fixed-focus lens or
+   * no probe answer, either way autofocus is the only stop.
+   */
+  minFocus?: number
 }
 
 export interface SinkInfo {

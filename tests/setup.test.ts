@@ -6,6 +6,8 @@ import {
   camSizes,
   deviceLabel,
   fieldsFor,
+  focusLabel,
+  focusStops,
   fpsStops,
   nextStop,
   reconcile,
@@ -66,6 +68,15 @@ describe("reconcile", () => {
   test("drops a zoom outside the camera's range, keeps one inside", () => {
     expect(reconcile({ ...DEFAULT_CONFIG, cameraId: "0", zoom: 0.5 }, cams, sinks).zoom).toBeNull()
     expect(reconcile({ ...DEFAULT_CONFIG, cameraId: "0", zoom: 10 }, cams, sinks).zoom).toBe(10)
+  })
+
+  test("drops a focus beyond the lens or on a camera without one, keeps one inside", () => {
+    const probed = [{ ...cams[0], minFocus: 10 }, cams[1]]
+    expect(reconcile({ ...DEFAULT_CONFIG, cameraId: "0", focus: 2 }, probed, sinks).focus).toBe(2)
+    expect(reconcile({ ...DEFAULT_CONFIG, cameraId: "0", focus: 0 }, probed, sinks).focus).toBe(0) // ∞ is valid
+    expect(reconcile({ ...DEFAULT_CONFIG, cameraId: "0", focus: 12 }, probed, sinks).focus).toBeNull()
+    // cams[1] reports no minFocus — a fixed-focus lens keeps only autofocus.
+    expect(reconcile({ ...DEFAULT_CONFIG, cameraId: "1", focus: 2 }, probed, sinks).focus).toBeNull()
   })
 
   test("an unknown camera id falls back to the first camera", () => {
@@ -200,21 +211,54 @@ describe("suggestedRotation", () => {
 })
 
 describe("fieldsFor", () => {
-  // One menu, both backends. The only drop is the v4l2 buffer on companion — a scrcpy
-  // flag ffmpeg has no equivalent for, and a stepper that can do nothing is worse than
-  // not being there. fps stays with its single stop: showing it is how the ceiling is
-  // visible, like the single camera.
-  test("the two backends differ only by the buffer field", () => {
-    expect(fieldsFor("companion")).toEqual(fieldsFor("scrcpy").filter((f) => f !== "buffer"))
+  // One menu, both backends. Each drops the one stepper that can do nothing on its path:
+  // the v4l2 buffer is a scrcpy flag ffmpeg has no equivalent for, focus a companion
+  // intent extra scrcpy has no flag for. fps stays with its single stop: showing it is
+  // how the ceiling is visible, like the single camera.
+  test("companion drops the buffer, scrcpy drops focus, nothing else differs", () => {
+    expect(fieldsFor("companion").filter((f) => f !== "focus") as string[]).toEqual(
+      fieldsFor("scrcpy").filter((f) => f !== "buffer"),
+    )
     expect(fieldsFor("companion")).toContain("fps")
+    expect(fieldsFor("companion")).toContain("focus")
     expect(fieldsFor("companion")).toContain("aspect")
+    expect(fieldsFor("companion")).not.toContain("buffer")
   })
 
-  test("the scrcpy path keeps every field", () => {
+  test("the scrcpy path keeps every field but focus", () => {
     expect(fieldsFor("scrcpy")).toContain("bitrate")
     expect(fieldsFor("scrcpy")).toContain("zoom")
     expect(fieldsFor("scrcpy")).toContain("buffer")
     expect(fieldsFor("scrcpy")).toContain("aspect")
+    expect(fieldsFor("scrcpy")).not.toContain("focus")
+  })
+})
+
+describe("focusStops", () => {
+  test("autofocus only for a fixed-focus lens or no probe answer", () => {
+    expect(focusStops(undefined)).toEqual([null])
+    expect(focusStops(0)).toEqual([null])
+  })
+
+  test("auto, infinity, presets inside the lens's reach, closing on its minimum", () => {
+    const stops = focusStops(10)
+    expect(stops[0]).toBeNull()
+    expect(stops[1]).toBe(0) // infinity
+    expect(stops.at(-1)).toBe(10) // the closest the lens goes
+    expect(stops).toContain(2) // 50cm
+  })
+
+  test("no duplicate when the lens minimum is also a preset", () => {
+    expect(focusStops(5).filter((f) => f === 5)).toHaveLength(1)
+  })
+
+  test("labels read as distances, not diopters", () => {
+    expect(focusLabel(null)).toBe("auto")
+    expect(focusLabel(0)).toBe("∞")
+    expect(focusLabel(0.5)).toBe("2m")
+    expect(focusLabel(1)).toBe("1m")
+    expect(focusLabel(2)).toBe("50cm")
+    expect(focusLabel(10)).toBe("10cm")
   })
 })
 

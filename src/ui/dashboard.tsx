@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { useKeyboard } from "@opentui/react"
 import type { StreamConfig } from "../config"
 import type { RunnerState, StreamEvent } from "../scrcpy/runner"
+import { focusLabel } from "./setup"
 
 export interface LogLine {
   at: string
@@ -50,7 +51,7 @@ export function Dashboard(props: {
   useKeyboard((key) => {
     if (key.name === "z" && !companion) props.onZoomCycle()
     if (key.name === "l") props.onCameraCycle()
-    if (key.name === "t" && !companion) props.onTorchToggle()
+    if (key.name === "t") props.onTorchToggle()
     if (key.name === "p") setNotice(props.onPreview())
     if (key.name === "r") props.onRestart()
     if (key.name === "s") props.onStop()
@@ -61,22 +62,17 @@ export function Dashboard(props: {
   const drops = props.log.filter((l) => l.msg.startsWith("restarting")).length
   const stateColor = props.state === "running" ? "green" : props.state === "restarting" ? "yellow" : "red"
 
-  const fields: [string, string][] = companion
-    ? [
-        ["camera", "back"],
-        ["size", props.config.size],
-        ["fps", String(props.config.fps)],
-        ["sink", props.config.sink],
-      ]
-    : [
-        ["camera", props.config.cameraId],
-        ["size", props.config.size],
-        ["fps", props.config.highSpeed ? `${props.config.fps} hs` : String(props.config.fps)],
-        ["bitrate", props.config.bitrate],
-        ["zoom", props.config.zoom === null ? "auto" : `${props.config.zoom}x`],
-        ["torch", props.config.torch ? "on" : "off"],
-        ["sink", props.config.sink],
-      ]
+  const fields: [string, string][] = [
+    ["camera", props.config.cameraId],
+    ["size", props.config.size],
+    ["fps", props.config.highSpeed ? `${props.config.fps} hs` : String(props.config.fps)],
+    ["bitrate", props.config.bitrate],
+    ["zoom", props.config.zoom === null ? "auto" : `${props.config.zoom}x`],
+    // Focus is a companion intent extra; scrcpy has no flag for it, so no row either.
+    ...(companion ? ([["focus", focusLabel(props.config.focus)]] as [string, string][]) : []),
+    ["torch", props.config.torch ? "on" : "off"],
+    ["sink", props.config.sink],
+  ]
 
   return (
     <box style={{ border: true, padding: 1, flexDirection: "column", gap: 1 }} title="android-cam-tui — dashboard">
@@ -106,7 +102,7 @@ export function Dashboard(props: {
       {notice && <text fg="#888">{notice}</text>}
       <text fg="cyan">
         {companion
-          ? "l: camera · p: preview · r: restart · s: stop → setup · q: quit"
+          ? "l: camera · t: torch · p: preview · r: restart · s: stop → setup · q: quit"
           : "z: zoom · l: camera · t: torch · p: preview · r: restart · s: stop → setup · q: quit"}
       </text>
     </box>

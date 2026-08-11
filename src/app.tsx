@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { COMPANION_CAM, probeCompanionCams } from "./companion"
+import { COMPANION_CAM, probeCompanionCams, sendExtras, serviceExtras } from "./companion"
 import { loadConfig, saveConfig, type StreamConfig } from "./config"
 import { backendFor } from "./doctor"
 import { openPreview } from "./preview"
@@ -142,7 +142,19 @@ export function App(props: { onQuit: () => void; autoStart?: boolean }) {
           orientation: suggestedRotation(next) ?? config.orientation,
         })
       }}
-      onTorchToggle={() => void applyConfig({ ...config, torch: !config.torch })}
+      onTorchToggle={() => {
+        const next = { ...config, torch: !config.torch }
+        // Companion torch applies mid-stream: the service reads a re-run start intent's
+        // torch extra on the live capture session, so no restart — scrcpy has no such
+        // channel and pays the restart applyConfig brings.
+        if (config.backend === "companion") {
+          setConfig(next)
+          void saveConfig(next)
+          sendExtras(config.serial, serviceExtras(next)).catch((e) =>
+            pushLog(`error: ${e instanceof Error ? e.message : String(e)}`),
+          )
+        } else void applyConfig(next)
+      }}
       onPreview={() => openPreview(config.sink)}
       onRestart={() => void applyConfig(config)}
       onStop={() => {

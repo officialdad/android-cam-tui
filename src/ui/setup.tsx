@@ -10,21 +10,22 @@ import { Doctor } from "./doctor"
 import { annotateSizes } from "./sizes"
 import { FilteredSelect, Stepper } from "./widgets"
 
-const FIELDS = ["device", "camera", "size", "fps", "zoom", "bitrate", "orientation", "aspect", "buffer", "sink"] as const
+const FIELDS = ["device", "camera", "size", "fps", "zoom", "focus", "bitrate", "orientation", "aspect", "buffer", "sink"] as const
 type Field = (typeof FIELDS)[number]
 // The "1 camera" and "2 resolution" panels own these; whatever fieldsFor(backend) leaves
 // is what belongs in the "3 output" box, so this is the only place that split is named.
 const PANEL_FIELDS: Field[] = ["device", "camera", "size"]
 
 /**
- * One menu, both backends — every field means the same thing on either path. The single
- * exception is the v4l2 buffer, a scrcpy flag ffmpeg has no equivalent for: a stepper
- * that can do nothing is worse than not being there. Companion's fps stays visible even
+ * One menu, both backends — every field means the same thing on either path. The two
+ * exceptions are steppers that can do nothing on the other path, worse than not being
+ * there: the v4l2 buffer is a scrcpy flag ffmpeg has no equivalent for, and focus is a
+ * companion intent extra scrcpy has no flag for. Companion's fps stays visible even
  * though it has one stop — like the single camera and its sizes, showing it is how the
  * ceiling is visible.
  */
 export function fieldsFor(backend: StreamConfig["backend"]): Field[] {
-  return backend === "companion" ? FIELDS.filter((f) => f !== "buffer") : [...FIELDS]
+  return FIELDS.filter((f) => (backend === "companion" ? f !== "buffer" : f !== "focus"))
 }
 
 const BITRATES = ["4M", "8M", "16M", "24M", "32M"]
@@ -51,6 +52,26 @@ export function zoomStops(range: [number, number] | null): (number | null)[] {
 }
 
 const zoomLabel = (z: number | null) => (z === null ? "auto" : `${z}x`)
+
+const FOCUS_PRESETS = [0.5, 1, 2, 3, 5, 10] // diopters: 2m, 1m, 50cm, 33cm, 20cm, 10cm
+
+/**
+ * "auto" plus infinity and distance presets strictly inside the lens's reach, closing on
+ * `minFocus` — the nearest the lens focuses (LENS_INFO_MINIMUM_FOCUS_DISTANCE). No probe
+ * answer or a fixed-focus lens (undefined) leaves autofocus as the only stop.
+ */
+export function focusStops(minFocus: number | undefined): (number | null)[] {
+  if (!minFocus) return [null]
+  return [null, 0, ...FOCUS_PRESETS.filter((f) => f < minFocus), minFocus]
+}
+
+/** Diopters to the distance the user thinks in: 0 = ∞, 2 = 50cm. */
+export const focusLabel = (f: number | null) => {
+  if (f === null) return "auto"
+  if (f === 0) return "∞"
+  const m = 1 / f
+  return m >= 1 ? `${+m.toFixed(1)}m` : `${Math.round(m * 100)}cm`
+}
 
 /** Next stop after `current`, wrapping. A value not in the list (a config from another phone) lands on the first. */
 export function nextStop<T>(stops: T[], current: T): T {
@@ -122,6 +143,7 @@ export function reconcile(
 ): StreamConfig {
   const cam = cams.find((c) => c.id === cfg.cameraId) ?? cams[0]
   const zoomOk = cfg.zoom !== null && cam.zoomRange && cfg.zoom >= cam.zoomRange[0] && cfg.zoom <= cam.zoomRange[1]
+  const focusOk = cfg.focus !== null && cam.minFocus !== undefined && cfg.focus >= 0 && cfg.focus <= cam.minFocus
   const all = camSizes(cam)
   const size = all.includes(cfg.size) ? cfg.size : all[0]
   const stops = fpsStops(cam, size)
@@ -137,6 +159,7 @@ export function reconcile(
     fps: stop?.fps ?? cfg.fps,
     highSpeed: stop?.highSpeed ?? false,
     zoom: zoomOk ? cfg.zoom : null,
+    focus: focusOk ? cfg.focus : null,
     // Only when the saved camera did not survive the snap: a config that kept its camera
     // keeps the rotation the user chose for it.
     orientation: (cam.id !== cfg.cameraId ? suggestedRotation(cam) : null) ?? cfg.orientation,
@@ -146,14 +169,15 @@ export function reconcile(
 }
 
 /**
- * With a real probe the caps *are* the phone's own, so only the missing feature needs
- * saying. The fallback line covers an old APK that cannot answer dumpsys: everything on
- * screen is then a request the phone clamps, and the user should know that.
+ * With a real probe the caps *are* the phone's own and every field works, so the line is
+ * just the backend tag. The fallback covers an old APK that cannot answer dumpsys:
+ * everything on screen is then a request the phone clamps — or, for the extras it
+ * predates (torch, focus), ignores — and the user should know that.
  */
 export const companionCeiling = (fallback: boolean) =>
   fallback
-    ? `companion backend — old APK: ${COMPANION_CAM.fps[0]}fps, phone clamps size and zoom, no torch`
-    : "companion backend — no torch"
+    ? `companion backend — old APK: ${COMPANION_CAM.fps[0]}fps, phone clamps size and zoom, no torch or focus`
+    : "companion backend"
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -344,6 +368,7 @@ export function Setup(props: {
 
   const stops = fpsStops(cam, config.size)
   const zooms = zoomStops(cam.zoomRange)
+  const focuses = focusStops(cam.minFocus)
   const bitrates = bitrateStops(config.bitrate)
   const sinkPaths = sinks.length > 0 ? sinks.map((s) => s.path) : [config.sink]
   const sinkLabel = sinks.find((s) => s.path === config.sink)?.label
@@ -400,6 +425,7 @@ export function Setup(props: {
                     ...config,
                     cameraId: next.id,
                     zoom: null,
+                    focus: null,
                     orientation: suggestedRotation(next) ?? config.orientation,
                   },
                   cameras,
@@ -451,6 +477,16 @@ export function Setup(props: {
               index={Math.max(0, zooms.indexOf(config.zoom))}
               onChange={(i) => setConfig({ ...config, zoom: zooms[i] })}
             />
+            {companion && (
+              <Stepper
+                label="focus"
+                bar
+                focused={field === "focus"}
+                options={focuses.map(focusLabel)}
+                index={Math.max(0, focuses.indexOf(config.focus))}
+                onChange={(i) => setConfig({ ...config, focus: focuses[i] })}
+              />
+            )}
             <Stepper
               label="bitrate"
               focused={field === "bitrate"}

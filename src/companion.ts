@@ -1,6 +1,6 @@
-// Built from github.com/officialdad/android-cam at fcc681d ("feat: camera probe over
-// dumpsys, camera selection extra"). sha256
-// b8a51d3016daa447ce244b91831582e84d7fcc1049b64d23dbd7da9f5c89a7ac, 16787 bytes. The
+// Built from github.com/officialdad/android-cam at 0fca43c ("feat: fixed focus via
+// focus extra, minFocusDistance in probe"). sha256
+// 965eac2cf3756356918d3fdefeee5e1717c9dec45bd1bd718f7e51254ee723bb, 16787 bytes. The
 // doctor tells users to install this on their phone, so a rebuild updates both lines.
 import apk from "./android-cam.apk" with { type: "file" }
 import { homedir } from "node:os"
@@ -71,6 +71,11 @@ export function parseCompanionProbe(dumpsys: string): CameraInfo[] | null {
         maxSize: sizes[0], // dump() sorts descending by area
         fps: fps.length > 0 ? [...fps] : [...COMPANION_CAM.fps],
         zoomRange: typeof c.maxZoom === "number" && c.maxZoom > 1 ? [1, c.maxZoom] : null,
+        // 0 means a fixed-focus lens — no manual focus, so no stepper stops either.
+        minFocus:
+          typeof c.minFocusDistance === "number" && c.minFocusDistance > 0
+            ? c.minFocusDistance
+            : undefined,
         sizes,
         highSpeed: {},
         orientation: typeof c.orientation === "number" ? c.orientation : undefined,
@@ -147,7 +152,7 @@ export function parseBitrate(b: string): number {
  * what the camera offers and applies them at the next client connect.
  */
 export function serviceExtras(
-  c: Pick<StreamConfig, "size" | "fps" | "bitrate" | "zoom" | "cameraId">,
+  c: Pick<StreamConfig, "size" | "fps" | "bitrate" | "zoom" | "cameraId" | "focus" | "torch">,
 ): string[] {
   const [width, height] = c.size.split("x")
   return [
@@ -158,6 +163,10 @@ export function serviceExtras(
     // values, so dropping the extra after zooming would leave the phone zoomed forever.
     // The service reads ≤100 as off, which is what auto means here (no digital crop).
     ...["--ei", "zoom", String(c.zoom === null ? 100 : Math.round(c.zoom * 100))],
+    // Same always-sent rule: negative resets to autofocus, absent would keep a stale
+    // fixed distance. Diopters (0 = infinity), clamped by the phone to the lens's closest.
+    ...["--ef", "focus", String(c.focus === null ? -1 : c.focus)],
+    ...["--ei", "torch", c.torch ? "1" : "0"],
     // String extra — camera2 ids are strings, and an unknown one falls back to the back
     // camera on the phone (clamp, never fail).
     ...["--es", "camera", c.cameraId],
@@ -272,6 +281,21 @@ export async function companionState(serial: string, adbPath = "adb"): Promise<C
 }
 
 /**
+ * Re-run the start intent on the (possibly already live) service. Torch is the one extra
+ * the service applies mid-stream — this is how the dashboard toggles a fill light without
+ * a restart — everything else lands at the next client connect. `am` reports its real
+ * failures on stdout with exit code 0: no such subcommand on an Android below 8.0, a
+ * SecurityException, a background-start restriction, a package a battery optimiser
+ * force-stopped, or a `.CamService` renamed out from under `PKG` by a future APK rebuild.
+ * Extras are the config channel; an old APK ignores them and streams its defaults.
+ */
+export async function sendExtras(serial: string | null, extras: string[], adbPath = "adb"): Promise<void> {
+  const base = serial ? [adbPath, "-s", serial] : [adbPath]
+  const svc = await adb([...base, "shell", "am", "start-foreground-service", "-n", `${PKG}/.CamService`, ...extras])
+  if (/^Error:/m.test(svc.out)) throw new Error(svc.out.trim())
+}
+
+/**
  * Forward the port, start the service, wait for its socket. Never starts an activity:
  * `am start-foreground-service` leaves a locked phone locked, and waking it would start
  * face unlock, which opens a camera of its own and pushes the device past the
@@ -287,14 +311,9 @@ export async function prepPhone(
   // Idempotent, so it is re-run on every spawn rather than tracked and torn down.
   const fwd = await adb([...base, "forward", `tcp:${PORT}`, `localabstract:${SOCKET}`])
   if (fwd.code !== 0) throw new Error(fwd.out.trim() || "adb forward failed")
-  // `am` reports its real failures on stdout with exit code 0: no such subcommand on an
-  // Android below 8.0, a SecurityException, a background-start restriction, a package a
-  // battery optimiser force-stopped, or a `.CamService` renamed out from under `PKG` by a
-  // future APK rebuild. Unread, every one of them becomes the same 6-second timeout below
-  // with a camera-permission hint that is wrong in all of them.
-  // Extras are the config channel; an old APK ignores them and streams its defaults.
-  const svc = await adb([...base, "shell", "am", "start-foreground-service", "-n", `${PKG}/.CamService`, ...extras])
-  if (/^Error:/m.test(svc.out)) throw new Error(svc.out.trim())
+  // Unread, every `am` failure becomes the same 6-second timeout below with a
+  // camera-permission hint that is wrong in all of them — sendExtras throws instead.
+  await sendExtras(serial, extras, adbPath)
   // The service binds its socket a beat after the process starts; racing ffmpeg against
   // it just fails.
   for (let i = 0; i < tries; i++) {

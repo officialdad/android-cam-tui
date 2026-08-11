@@ -108,10 +108,10 @@ they warn when another phone works and block when none does. `stop()` removes th
 `adb forward`: it lives in the adb server and outlives the TUI, and anything that
 connects to that port makes the phone open its camera.
 
-The APK (source in the separate `android-cam` repo, `fcc681d`) answers a probe over
+The APK (source in the separate `android-cam` repo, `0fca43c`) answers a probe over
 `adb shell dumpsys activity service …/.CamService` — its `dump()` prints one JSON
-line with real cameras: id, facing, `SENSOR_ORIENTATION`, max digital zoom, encoder
-sizes, AE fps ranges. `parseCompanionProbe`/`probeCompanionCams` in `src/companion.ts`
+line with real cameras: id, facing, `SENSOR_ORIENTATION`, max digital zoom, minimum
+focus distance, encoder sizes, AE fps ranges. `parseCompanionProbe`/`probeCompanionCams` in `src/companion.ts`
 turn that into `CameraInfo[]`; the probe starts the service itself (idempotent, no
 extras) and needs no CAMERA grant. `COMPANION_CAM` is only the fallback for an APK
 too old to answer. Probed fps options are the AE upper bounds — rates the service
@@ -120,19 +120,25 @@ stream rate) honest; the fallback keeps fps locked to its single stop for the sa
 reason. Sensor orientation pre-selects the rotate option via `suggestedRotation()`,
 applied only when the camera changes — never over a user's pick.
 
-Size, bitrate, zoom and camera ride the start intent (`--ei`/`--es` in
-`serviceExtras()`); the service clamps to what the camera offers, and the socket
-stays pure H.264 — its client is ffmpeg, which can neither send a config frame nor
-tolerate a reply. Zoom is always sent — a re-run `am` keeps absent extras at their
-previous values, so "auto" must be an explicit 100. Rotation and aspect are the
-other direction: ffmpeg `-vf` filters in `ffmpegArgs()` (Annex-B has no rotation
-metadata; phone-side rotation would need a GL pass), so they work with any APK. The
-scrcpy path crops too (`cropFor()` in `config.ts` → `--crop`), with the same
-crop-before-orientation order on both backends — one menu, one meaning per field;
-only the v4l2 buffer stays scrcpy-only (`fieldsFor()`). Old APK + new host: extras
-ignored, no probe answer, defaults stream. New APK + old host: no extras, defaults
-stream. A rebuilt APK updates `src/android-cam.apk` and the sha256 comment in
-`src/companion.ts`.
+Size, bitrate, zoom, focus, torch and camera ride the start intent
+(`--ei`/`--ef`/`--es` in `serviceExtras()`); the service clamps to what the camera
+offers, and the socket stays pure H.264 — its client is ffmpeg, which can neither
+send a config frame nor tolerate a reply. Zoom, focus and torch are always sent — a
+re-run `am` keeps absent extras at their previous values, so "auto" must be an
+explicit 100, autofocus an explicit -1, torch-off an explicit 0. Focus is a fixed
+distance in diopters (0 = infinity), bounded by the probed
+`LENS_INFO_MINIMUM_FOCUS_DISTANCE` (`CameraInfo.minFocus`; absent = fixed-focus
+lens, autofocus is the only stop) and clamped by the phone. Torch is the one extra
+the service applies mid-stream, which is why the dashboard's `t` on companion goes
+through `sendExtras()` (a bare re-run of the start intent) instead of a restart.
+Rotation and aspect are the other direction: ffmpeg `-vf` filters in `ffmpegArgs()`
+(Annex-B has no rotation metadata; phone-side rotation would need a GL pass), so
+they work with any APK. The scrcpy path crops too (`cropFor()` in `config.ts` →
+`--crop`), with the same crop-before-orientation order on both backends — one menu,
+one meaning per field; the v4l2 buffer stays scrcpy-only and focus companion-only
+(`fieldsFor()`). Old APK + new host: extras ignored, no probe answer, defaults
+stream. New APK + old host: no extras, defaults stream. A rebuilt APK updates
+`src/android-cam.apk` and the sha256 comment in `src/companion.ts`.
 
 ### StreamRunner epochs
 

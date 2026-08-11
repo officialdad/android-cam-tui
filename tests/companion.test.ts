@@ -128,20 +128,38 @@ describe("parseBitrate", () => {
 })
 
 describe("serviceExtras", () => {
-  test("splits the size and converts the bitrate, zoom and camera for the intent", () => {
-    expect(serviceExtras({ size: "1920x1080", fps: 30, bitrate: "8M", zoom: 1.5, cameraId: "1" })).toEqual([
+  test("splits the size and converts the bitrate, zoom, focus and camera for the intent", () => {
+    expect(
+      serviceExtras({ size: "1920x1080", fps: 30, bitrate: "8M", zoom: 1.5, cameraId: "1", focus: 2, torch: true }),
+    ).toEqual([
       ...["--ei", "width", "1920", "--ei", "height", "1080"],
       ...["--ei", "fps", "30", "--ei", "bitrate", "8000000"],
       ...["--ei", "zoom", "150"],
+      ...["--ef", "focus", "2"],
+      ...["--ei", "torch", "1"],
       ...["--es", "camera", "1"],
     ])
   })
 
   // A re-run `am` keeps absent extras at their previous values, so "auto" must be an
   // explicit 100 (= off to the service) — dropping the extra would leave the phone zoomed.
-  test("auto zoom is sent as an explicit 100, never omitted", () => {
-    const extras = serviceExtras({ size: "1280x720", fps: 30, bitrate: "8M", zoom: null, cameraId: "0" })
+  // Focus and torch follow the same rule: -1 resets to autofocus, 0 turns the torch off.
+  test("auto zoom, autofocus and torch-off are sent explicitly, never omitted", () => {
+    const extras = serviceExtras({
+      size: "1280x720",
+      fps: 30,
+      bitrate: "8M",
+      zoom: null,
+      cameraId: "0",
+      focus: null,
+      torch: false,
+    })
     expect(extras.slice(extras.indexOf("zoom"), extras.indexOf("zoom") + 2)).toEqual(["zoom", "100"])
+    expect(extras.slice(extras.indexOf("focus"), extras.indexOf("focus") + 2)).toEqual(["focus", "-1"])
+    expect(extras.slice(extras.indexOf("torch"), extras.indexOf("torch") + 2)).toEqual(["torch", "0"])
+    // Infinity (0 diopters) is a real fixed distance, not falsy-into-autofocus.
+    const inf = serviceExtras({ size: "1280x720", fps: 30, bitrate: "8M", zoom: null, cameraId: "0", focus: 0, torch: false })
+    expect(inf.slice(inf.indexOf("focus"), inf.indexOf("focus") + 2)).toEqual(["focus", "0"])
   })
 })
 
@@ -155,11 +173,14 @@ describe("parseCompanionProbe", () => {
       fps: [15, 30], // distinct AE upper bounds, ascending
       zoomRange: [1, 4],
       orientation: 90,
+      minFocus: 10, // LENS_INFO_MINIMUM_FOCUS_DISTANCE, diopters
     })
     // maxZoom 1.0 means no digital zoom, not a [1,1] range; the front sensor sits at 270.
     expect(cams[1].zoomRange).toBeNull()
     expect(cams[1].orientation).toBe(270)
     expect(cams[1].facing).toBe("front")
+    // minFocusDistance 0.0 is a fixed-focus lens — no manual focus, so no bound either.
+    expect(cams[1].minFocus).toBeUndefined()
   })
 
   // An old APK has no dump() override — the framework prints its generic service dump and
@@ -218,11 +239,15 @@ describe("prepPhone", () => {
   test("forwards the port and starts the service before the socket poll", async () => {
     const log = join(mkdtempSync(join(tmpdir(), "adblog-")), "calls")
     const bin = fakeAdb(`echo "$@" >> ${log}\ncase "$*" in *"/proc/net/unix"*) ${UNIX_READY};; esac`)
-    await prepPhone("R5CT", bin, serviceExtras({ size: "1920x1080", fps: 30, bitrate: "8M", zoom: null, cameraId: "0" }))
+    await prepPhone(
+      "R5CT",
+      bin,
+      serviceExtras({ size: "1920x1080", fps: 30, bitrate: "8M", zoom: null, cameraId: "0", focus: null, torch: false }),
+    )
     const calls = await Bun.file(log).text()
     expect(calls).toContain("-s R5CT forward tcp:27183 localabstract:android-cam")
     expect(calls).toContain(
-      "-s R5CT shell am start-foreground-service -n com.officialdad.androidcam/.CamService --ei width 1920 --ei height 1080 --ei fps 30 --ei bitrate 8000000 --ei zoom 100 --es camera 0",
+      "-s R5CT shell am start-foreground-service -n com.officialdad.androidcam/.CamService --ei width 1920 --ei height 1080 --ei fps 30 --ei bitrate 8000000 --ei zoom 100 --ef focus -1 --ei torch 0 --es camera 0",
     )
     // No activity is ever started: waking a locked phone starts face unlock, which opens a
     // camera of its own and gets our own open rejected.

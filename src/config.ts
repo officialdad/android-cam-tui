@@ -10,6 +10,11 @@ export interface StreamConfig {
   highSpeed: boolean
   bitrate: string
   zoom: number | null
+  /**
+   * Fixed focus distance in diopters (0 = infinity, 2 = 50cm); null = autofocus.
+   * Companion-only — scrcpy has no focus flag — and clamped by the phone to the lens.
+   */
+  focus: number | null
   /** Camera flash held on as a fill light — set at capture start, so toggling restarts. */
   torch: boolean
   sink: string
@@ -32,6 +37,7 @@ export const DEFAULT_CONFIG: StreamConfig = {
   highSpeed: false,
   bitrate: "16M",
   zoom: null,
+  focus: null,
   torch: false,
   sink: "/dev/video3",
   serial: null,
