@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useKeyboard, useTerminalDimensions } from "@opentui/react"
+import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react"
 import type { SelectOption } from "@opentui/core"
 import { ASPECTS, buildArgs, loadConfig, ORIENTATIONS, type StreamConfig } from "../config"
 import { backendFor, checks, probeEnv, MIN_SDK, type Check, type Env } from "../doctor"
@@ -212,8 +212,28 @@ export function Setup(props: {
   // A ref, not state: this guard must be true for the *same* keystroke that opens filter
   // mode, and sibling useKeyboard handlers all fire before any re-render can land.
   const capturing = useRef(false)
-  const { width } = useTerminalDimensions()
+  const { width, height } = useTerminalDimensions()
+  const renderer = useRenderer()
   const wide = width >= 100
+
+  /**
+   * Repaint the whole surface after anything that can re-lay-out the screen.
+   *
+   * opentui writes only the cells it believes changed, and it gets that wrong across a
+   * re-layout: the rows that moved are drawn in their new place while the ones they
+   * vacated keep the glyphs they had. A few camera switches leave the "3 output" box
+   * drawn twice a few rows apart, with labels no longer against their own values — the
+   * screen stops being navigable even though the state underneath is right.
+   *
+   * `resize` is the only public call that clears the surface, and it has to land on a
+   * width the renderer is not already at — resizing to the current size returns early
+   * and repaints nothing. One column narrower and straight back costs a frame and is
+   * the whole workaround. Drop it once opentui tracks damage across a re-layout.
+   */
+  useEffect(() => {
+    renderer.resize(width - 1, height)
+    renderer.resize(width, height)
+  }, [renderer, width, height, config, field, notice, checkList, cameras, devices])
 
   const getCameras = props.probes?.cameras ?? ((serial: string | null) => probeCameras("scrcpy", serial))
   const getEnv = props.probes?.env ?? probeEnv

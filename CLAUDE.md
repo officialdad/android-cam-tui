@@ -181,6 +181,23 @@ run through the whole UI:
   `filteringRef` in `FilteredSelect`, `idxRef` in `Stepper`, `capturing` in `Setup`.
   Removing a ref in favour of the state it mirrors looks like a cleanup and is a bug.
 
+### The screen is repainted by hand
+
+opentui writes only the cells it believes changed, and it is wrong about that across a
+re-layout: rows that moved are drawn in their new place while the ones they vacated keep
+their old glyphs. A few camera switches leave the "3 output" box drawn twice a few rows
+apart, labels no longer against their own values — unnavigable, though the state under it
+is correct. Present in 0.5.1 (where a single arrow key was enough), still present in
+0.5.9 and in the nightlies.
+
+`Setup` therefore forces a full repaint through `renderer.resize()` on every state that
+can re-lay-out the screen. It **must** resize to a different width first — resizing to
+the size the renderer already has returns early and paints nothing, which is why the call
+is one column narrower and straight back. That effect is load-bearing; it looks like dead
+code and removing it brings the whole bug back. Drop it only once opentui tracks damage
+across a re-layout, and check against a real phone: the demo fixtures carry short enough
+option lists that they never reproduce it.
+
 ### Config reconciliation
 
 `StreamConfig` (`src/config.ts`) is persisted to `~/.config/android-cam-tui/config.json`
