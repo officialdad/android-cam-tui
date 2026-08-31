@@ -1,6 +1,6 @@
 # Maintainer: opariffazman <opariffazman@gmail.com>
 pkgname=android-cam-tui-bin
-pkgver=0.4.1
+pkgver=0.4.2
 pkgrel=1
 pkgdesc="Terminal UI for using an Android phone as a Linux webcam, via scrcpy and v4l2loopback"
 arch=('x86_64' 'aarch64')
@@ -22,8 +22,8 @@ source=("LICENSE-$pkgver::$url/raw/v$pkgver/LICENSE")
 source_x86_64=("$pkgname-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/android-cam-tui-linux-x64.tar.gz")
 source_aarch64=("$pkgname-$pkgver-aarch64.tar.gz::$url/releases/download/v$pkgver/android-cam-tui-linux-arm64.tar.gz")
 sha256sums=('e63d105c68bd498494a00fea7fad35ee03f1797fe35467171672f7270dce963d')
-sha256sums_x86_64=('f5eb778ef06dfae00e8d150253d4d76b9981133edc5aad5be2a06fdbcb472405')
-sha256sums_aarch64=('15026e5cac4077ae86686283a9562b202925e3d3d17b10068d704c0012a41a0a')
+sha256sums_x86_64=('f43daeee1a113adde83b6b7482434609e0642290ce4c393c2a49c3cb7bf91d8b')
+sha256sums_aarch64=('e6ef4d587c09ca6da74a91176ff62b9f6ae190b86da84f1debd97b261e59b589')
 
 package() {
   install -Dm755 "$srcdir/android-cam-tui" "$pkgdir/usr/bin/android-cam-tui"
