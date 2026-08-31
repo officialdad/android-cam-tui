@@ -7,7 +7,7 @@
 Terminal UI for using an Android phone as a Linux webcam via
 [scrcpy](https://github.com/Genymobile/scrcpy) and v4l2loopback.
 
-Probes your phone's real cameras (lenses, resolutions, fps, zoom ranges),
+Probes your phone's real cameras (lenses, resolutions, frame rates),
 streams the one you pick into a virtual webcam device, and supervises the
 stream — auto-restarting when Android evicts the camera (face unlock, camera
 app opened, phone rebooted).
@@ -63,9 +63,11 @@ The APK reports its real cameras — ids, facing, sizes, frame rates, zoom
 ceiling, sensor orientation — over `dumpsys`, so the picker shows what the
 phone actually has: camera selection, real sizes and fps options, a real zoom
 range, and the rotate option pre-selected from the sensor's orientation.
-Camera, size, fps, bitrate and digital zoom ride the service's start intent;
-rotation and aspect crop happen host-side in ffmpeg. There is no torch, and an
-APK too old to answer the probe falls back to fixed 1280x720@30 requests.
+Camera, size, fps, bitrate, digital zoom, focus and torch ride the service's
+start intent; rotation and aspect crop happen host-side in ffmpeg. Torch is the
+one the service applies to a live capture session, so `t` here does not restart
+the stream. An APK too old to answer the probe falls back to fixed 1280x720@30
+requests.
 
 ## Install
 
@@ -150,11 +152,17 @@ Wireless adds jitter — raise `buffer` (`--v4l2-buffer`, in ms) if the feed stu
 ## Dashboard
 
 `z` cycle zoom presets, `l` cycle camera, `t` toggle the camera torch (fill
-light — scrcpy backend only, the companion app has no torch), `p` open a
-preview window, `r` restart, `s` back to setup, `q` quit.
+light), `p` open a preview window, `r` restart, `s` back to setup, `q` quit.
 
-Every camera parameter is fixed when the capture session opens, so zoom, torch
-and camera changes restart the stream — the sink drops for about a second.
+Torch and zoom are companion-backend features today. `--camera-torch` and
+`--camera-zoom` are documented on scrcpy's master branch and ship in no released
+scrcpy, so on the scrcpy backend `t` reports that and zoom offers only `auto`
+until scrcpy ships them — the TUI reads `scrcpy --help` and never passes a flag
+your build does not have.
+
+Every camera parameter is fixed when the capture session opens, so zoom and
+camera changes restart the stream — the sink drops for about a second. Companion
+torch is the exception: the service applies it to the running session.
 
 `p` shells out to whichever of `ffplay`, `mpv` or `vlc` is installed and points
 it at the sink, since scrcpy itself runs with `--no-window`. The preview window
