@@ -47,11 +47,16 @@ its **spawn wrapper**, and that split is the entire testing seam:
 | `parseCameras`, `parseSinks` | `probeCameras`, `probeSinks` | `src/scrcpy/probe.ts` |
 | `parseDevices` | `listDevices`, `goWireless`, `goUsb` | `src/scrcpy/devices.ts` |
 | `buildArgs` | — | `src/config.ts` |
-| `checks`, `detectDistro`, `parseScrcpyVersion` | `probeEnv` | `src/doctor.ts` |
+| `checks`, `detectDistro`, `parseScrcpyVersion`, `parseScrcpyFlags` | `probeEnv`, `probeScrcpyFlags` | `src/doctor.ts` |
 | `parseCompanionState`, `socketReady` | `companionState`, `prepPhone`, `unforward` | `src/companion.ts` |
 | `ffmpegArgs` | — | `src/companion.ts` |
 
-Parsers are tested against text fixtures in `tests/fixtures/`. `StreamRunner` takes a
+Parsers are tested against text fixtures in `tests/fixtures/`. **Every fixture is a
+verbatim capture from the real tool** — `scrcpy … > tests/fixtures/x.txt 2>&1`, never text
+transcribed from a doc or a plan. The camera fixture was hand-written from the design plan
+using an `fps={…}` syntax no scrcpy has ever printed, so `parseCameras` matched the fixture
+and zero real phones, and the suite stayed green through every release. A parser fixture
+that was never captured tests only itself. `StreamRunner` takes a
 `scrcpyPath` option so tests inject shell-script fakes (`fake-scrcpy.sh`, or one
 written to a tmpdir). Keep new shell-outs to this shape: parse
 function first, spawn wrapper around it.
@@ -82,6 +87,15 @@ spawn wrapper wants its try around the spawn itself, not just around the await �
 that is what `probe.ts` and `devices.ts` do. `runner.ts` and `preview.ts` still
 spawn bare; both are only reachable once something else has proved the binary is
 there (a `block` check, `Bun.which`), so keep that guarantee if you move them.
+
+scrcpy's camera flags arrive release by release, and an unrecognized option makes scrcpy
+exit *before* it opens the camera — which `StreamRunner` can only read as a dead stream and
+retry until it gives up. `parseScrcpyFlags` reads the long options out of `scrcpy --help`,
+and `buildArgs(config, flags)` drops the ones in `OPTIONAL_FLAGS` that this build lacks.
+`--camera-torch` and `--camera-zoom` are documented on upstream master and ship in no
+released scrcpy (3.3.4 included), so both are gated today. Everything outside
+`OPTIONAL_FLAGS` is emitted unconditionally, so a mis-parsed help text can never strip the
+stream's essentials. Add a flag to that list only when scrcpy grew it after 3.0.
 
 `adb`'s `-s <serial>` must precede the subcommand (`adb -s X shell ...`), and every
 scrcpy/adb call is serial-scoped so a USB and a wireless device can be attached at once.

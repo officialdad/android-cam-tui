@@ -17,6 +17,8 @@ interface RunnerOpts {
   adbPath?: string
   restartDelayMs?: number
   maxAttempts?: number
+  /** Long options this scrcpy accepts, from `probeEnv`. Null emits every flag. */
+  scrcpyFlags?: string[] | null
   onEvent: (e: StreamEvent) => void
 }
 
@@ -50,6 +52,7 @@ export class StreamRunner {
   private readonly adbPath: string
   private readonly restartDelayMs: number
   private readonly maxAttempts: number
+  private readonly scrcpyFlags: string[] | null
   private readonly onEvent: (e: StreamEvent) => void
 
   constructor(opts: RunnerOpts) {
@@ -58,6 +61,7 @@ export class StreamRunner {
     this.adbPath = opts.adbPath ?? "adb"
     this.restartDelayMs = opts.restartDelayMs ?? 2000
     this.maxAttempts = opts.maxAttempts ?? 6
+    this.scrcpyFlags = opts.scrcpyFlags ?? null
     this.onEvent = opts.onEvent
     killChildrenOnExit()
   }
@@ -108,7 +112,7 @@ export class StreamRunner {
   private command(): string[] {
     return this.config.backend === "companion"
       ? [this.ffmpegPath, ...ffmpegArgs(PORT, this.config)]
-      : [this.scrcpyPath, ...buildArgs(this.config)]
+      : [this.scrcpyPath, ...buildArgs(this.config, this.scrcpyFlags)]
   }
 
   /**

@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { detectDistro, parseScrcpyVersion, checks, fixScript, type Distro, type Env } from "../src/doctor"
+import {
+  checks,
+  detectDistro,
+  fixScript,
+  parseScrcpyFlags,
+  parseScrcpyVersion,
+  type Distro,
+  type Env,
+} from "../src/doctor"
 import type { DeviceInfo } from "../src/scrcpy/devices"
 
 const fixture = (name: string) => Bun.file(`${import.meta.dir}/fixtures/${name}`).text()
@@ -44,6 +52,61 @@ describe("parseScrcpyVersion", () => {
   })
 })
 
+// Captured verbatim from `scrcpy 3.3.4 --help`.
+const helpText = await Bun.file(new URL("./fixtures/scrcpy-help.txt", import.meta.url)).text()
+
+describe("parseScrcpyFlags", () => {
+  const flags = parseScrcpyFlags(helpText)
+
+  test("collects the long options scrcpy advertises", () => {
+    expect(flags).toContain("--camera-id")
+    expect(flags).toContain("--camera-size")
+    expect(flags).toContain("--camera-high-speed")
+    expect(flags).toContain("--v4l2-sink")
+    expect(flags).toContain("--capture-orientation")
+  })
+
+  test("omits the camera flags 3.3.4 does not have", () => {
+    expect(flags).not.toContain("--camera-torch")
+    expect(flags).not.toContain("--camera-zoom")
+  })
+
+  test("reads the long option off a short-form definition line", () => {
+    // "    -b, --video-bit-rate=value"
+    expect(flags).toContain("--video-bit-rate")
+    expect(flags).toContain("--max-size")
+  })
+
+  test("takes only definitions, never a flag quoted inside a description", () => {
+    // scrcpy's --new-display help indents its examples by 8 and 12 spaces.
+    expect(parseScrcpyFlags("    --real-flag=value\n        --quoted-in-prose\n")).toEqual([
+      "--real-flag",
+    ])
+  })
+
+  test("every flag buildArgs can emit is advertised by scrcpy 3.3.4", () => {
+    for (const f of [
+      "--video-source",
+      "--camera-id",
+      "--camera-size",
+      "--camera-fps",
+      "--video-bit-rate",
+      "--v4l2-sink",
+      "--v4l2-buffer",
+      "--no-window",
+      "--no-audio",
+      "--crop",
+      "--camera-high-speed",
+      "--capture-orientation",
+    ])
+      expect(flags).toContain(f)
+  })
+
+  test("no help text yields no flags — probeScrcpyFlags turns that into null", () => {
+    expect(parseScrcpyFlags("")).toEqual([])
+  })
+})
+
 const OK: Env = {
   scrcpy: "/usr/bin/scrcpy",
   adb: "/usr/bin/adb",
@@ -51,6 +114,7 @@ const OK: Env = {
   ffmpeg: "/usr/bin/ffmpeg",
   player: "/usr/bin/mpv",
   scrcpyVersion: [4, 1],
+  scrcpyFlags: ["--camera-fps", "--camera-id", "--camera-size", "--v4l2-sink"],
   sinks: [{ label: "Phone Cam", path: "/dev/video3" }],
   devices: [{ serial: "R5CT", model: "SM_S911B", wireless: false, state: "device" }],
   distro: "arch",
@@ -291,6 +355,7 @@ describe("fixScript", () => {
     ffmpeg: null,
     player: null,
     scrcpyVersion: [2, 1],
+    scrcpyFlags: ["--camera-fps", "--camera-id", "--camera-size", "--v4l2-sink"],
     sinks: [],
     devices: [{ serial: "R5CT", model: "", wireless: false, state: "no" }],
   }

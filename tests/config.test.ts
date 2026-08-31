@@ -30,9 +30,12 @@ describe("buildArgs", () => {
       "--video-bit-rate=16M",
       "--v4l2-sink=/dev/video3",
       "--no-window",
-      "--stay-awake",
       "--no-audio",
     ])
+  })
+
+  test("never emits --stay-awake — camera source disables control, and scrcpy dies on the pair", () => {
+    expect(buildArgs({ ...DEFAULT_CONFIG, torch: true, zoom: 2 }).join(" ")).not.toContain("--stay-awake")
   })
 
   test("appends the high-speed flag only when set", () => {
@@ -43,6 +46,40 @@ describe("buildArgs", () => {
   test("appends zoom only when set", () => {
     expect(buildArgs({ ...DEFAULT_CONFIG, zoom: 0.6 })).toContain("--camera-zoom=0.6")
     expect(buildArgs(DEFAULT_CONFIG).join(" ")).not.toContain("--camera-zoom")
+  })
+})
+
+// scrcpy exits on an unrecognized option before it ever opens the camera, and the runner
+// reads that as a dead stream and retries — so an optional flag this build lacks costs the
+// whole session, not just the feature.
+describe("buildArgs against a probed flag list", () => {
+  const OLD = ["--camera-id", "--camera-size", "--camera-fps", "--v4l2-sink"]
+  const NEW = [...OLD, "--camera-torch", "--camera-zoom"]
+
+  test("drops torch and zoom when scrcpy does not advertise them", () => {
+    const args = buildArgs({ ...DEFAULT_CONFIG, torch: true, zoom: 2 }, OLD).join(" ")
+    expect(args).not.toContain("--camera-torch")
+    expect(args).not.toContain("--camera-zoom")
+  })
+
+  test("emits them once scrcpy does", () => {
+    const args = buildArgs({ ...DEFAULT_CONFIG, torch: true, zoom: 2 }, NEW)
+    expect(args).toContain("--camera-torch")
+    expect(args).toContain("--camera-zoom=2")
+  })
+
+  test("never gates a flag that has been there since 3.0", () => {
+    const args = buildArgs({ ...DEFAULT_CONFIG, v4l2Buffer: 100, orientation: "90" }, [])
+    expect(args).toContain("--v4l2-sink=/dev/video3")
+    expect(args).toContain("--v4l2-buffer=100")
+    expect(args).toContain("--capture-orientation=90")
+    expect(args).toContain("--camera-id=0")
+  })
+
+  test("an unprobed null list emits everything, as before", () => {
+    const args = buildArgs({ ...DEFAULT_CONFIG, torch: true, zoom: 2 }, null)
+    expect(args).toContain("--camera-torch")
+    expect(args).toContain("--camera-zoom=2")
   })
 
   test("appends serial as two elements only when set", () => {

@@ -38,6 +38,7 @@ createRoot(renderer).render(
         ffmpeg: "/usr/bin/ffmpeg",
         player: "/usr/bin/mpv",
         scrcpyVersion: [4, 1],
+        scrcpyFlags: ["--camera-fps", "--camera-id", "--camera-size", "--v4l2-sink"],
         sinks: SINKS,
         devices: DEVICES,
         distro: "arch",

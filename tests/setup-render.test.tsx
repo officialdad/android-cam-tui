@@ -14,6 +14,7 @@ const HEALTHY: Env = {
   ffmpeg: "/usr/bin/ffmpeg",
   player: "/usr/bin/mpv",
   scrcpyVersion: [4, 1],
+  scrcpyFlags: ["--camera-fps", "--camera-id", "--camera-size", "--v4l2-sink"],
   sinks: [{ label: "Phone Cam", path: "/dev/video3" }],
   devices: [{ serial: "R5CT", model: "SM_S911B", wireless: false, state: "device" }],
   distro: "debian",

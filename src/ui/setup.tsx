@@ -205,6 +205,10 @@ export function Setup(props: {
   const [config, setConfig] = useState<StreamConfig | null>(null)
   const [field, setField] = useState<Field>("camera")
   const [checkList, setCheckList] = useState<Check[] | null>(null)
+  // Only so the previewed command line matches the one the runner builds: a saved config
+  // can carry torch:true from a dashboard session, and buildArgs drops it on a scrcpy
+  // without --camera-torch.
+  const [scrcpyFlags, setScrcpyFlags] = useState<string[] | null>(null)
   // A ref, not state: this guard must be true for the *same* keystroke that opens filter
   // mode, and sibling useKeyboard handlers all fire before any re-render can land.
   const capturing = useRef(false)
@@ -231,6 +235,7 @@ export function Setup(props: {
       setCheckList(list)
       setDevices(env.devices)
       setSinks(env.sinks)
+      setScrcpyFlags(env.scrcpyFlags.length > 0 ? env.scrcpyFlags : null)
       if (list.some((c) => c.level === "block" && !c.ok)) return
       const cfg = await loadConfig()
       // Prefer the saved device, else the first one actually usable.
@@ -253,6 +258,7 @@ export function Setup(props: {
           blocker("cameras", `no cameras on ${pick?.serial ?? "this phone"} — scrcpy reported none`, [
             "# another app may hold the camera — close it, or reboot the phone",
             `scrcpy${serial ? ` -s ${serial}` : ""} --list-cameras`,
+            "# if that prints cameras, this build cannot parse them — report it",
           ]),
         ])
         return
@@ -535,7 +541,7 @@ export function Setup(props: {
       <text fg="#888">
         {companion
           ? `ffmpeg ${ffmpegArgs(PORT, config).join(" ")}`
-          : `scrcpy ${buildArgs(config).join(" ")}`}
+          : `scrcpy ${buildArgs(config, scrcpyFlags).join(" ")}`}
       </text>
       <text fg="cyan">↹ next · ⇧↹ prev · 1-3 jump · / filter · ↑↓ pick · ←→ adjust · w usb/wifi · ⏎ start</text>
     </box>

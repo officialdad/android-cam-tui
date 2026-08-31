@@ -25,8 +25,16 @@ export interface SinkInfo {
   path: string
 }
 
+/**
+ * scrcpy appends a Java `SortedSet` for the rates, so the real output is always
+ * `fps=[10, 15, 30]` — square brackets, unchanged from v2.4 through 3.3. The braces are
+ * tolerated because this parser once required them and matched nothing on every real
+ * phone. `zoom-range=` is the mirror case: documented on upstream master, absent from
+ * every released scrcpy, so the group stays optional and `zoomRange` stays null until
+ * scrcpy ships it.
+ */
 const CAM_RE =
-  /--camera-id=(\d+)\s+\((back|front|external), (\d+x\d+), fps=\{([\d, ]+)\}(?:, zoom-range=\[([\d.]+), ([\d.]+)\])?\)/
+  /--camera-id=(\d+)\s+\((back|front|external), (\d+x\d+), fps=[{[]([\d, ]+)[}\]](?:, zoom-range=\[([\d.]+), ([\d.]+)\])?\)/
 
 export function parseCameras(text: string): CameraInfo[] {
   const cams: CameraInfo[] = []
@@ -52,9 +60,9 @@ export function parseCameras(text: string): CameraInfo[] {
       inHighSpeed = true
       continue
     }
-    // High-speed entries carry their own rates: "- 1280x720 (fps={120, 240})". The
+    // High-speed entries carry their own rates: "- 1280x720 (fps=[120, 240])". The
     // camera-level fps list does not include them, so they are kept per size.
-    const size = line.match(/^\s+- (\d+x\d+)\s*(?:\(fps=\{([\d, ]+)\}\))?\s*$/)
+    const size = line.match(/^\s+- (\d+x\d+)\s*(?:\(fps=[{[]([\d, ]+)[}\]]\))?\s*$/)
     if (!size || !current) continue
     if (inHighSpeed) {
       if (size[2]) current.highSpeed[size[1]] = size[2].split(",").map((s) => Number(s.trim()))

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { COMPANION_CAM, probeCompanionCams, sendExtras, serviceExtras } from "./companion"
-import { loadConfig, saveConfig, type StreamConfig } from "./config"
-import { backendFor } from "./doctor"
+import { loadConfig, saveConfig, scrcpySupports, type StreamConfig } from "./config"
+import { backendFor, probeScrcpyFlags } from "./doctor"
 import { openPreview } from "./preview"
 import { listDevices, type DeviceInfo } from "./scrcpy/devices"
 import { probeCameras, type CameraInfo } from "./scrcpy/probe"
@@ -36,6 +36,9 @@ export function App(props: { onQuit: () => void; autoStart?: boolean }) {
   const [log, setLog] = useState<LogLine[]>([])
   const [, bump] = useState(0) // re-render on runner state changes
   const camerasRef = useRef<CameraInfo[]>([])
+  // Probed beside the cameras rather than handed down from Setup, so `--start` — which
+  // never renders the setup screen — gets the same answer.
+  const scrcpyFlagsRef = useRef<string[] | null>(null)
   const runnerRef = useRef<StreamRunner | null>(null)
   const startingRef = useRef(false)
 
@@ -61,8 +64,11 @@ export function App(props: { onQuit: () => void; autoStart?: boolean }) {
         // scrcpy's camera list must be probed *before* the stream holds the camera; the
         // companion probe is the reverse — dump() only answers a running service, which
         // `prepPhone()` (inside runner.start) guarantees, and it never opens the camera.
-        if (c.backend !== "companion") camerasRef.current = await probeCameras("scrcpy", c.serial)
-        const runner = new StreamRunner({ onEvent: pushEvent })
+        if (c.backend !== "companion") {
+          camerasRef.current = await probeCameras("scrcpy", c.serial)
+          scrcpyFlagsRef.current = await probeScrcpyFlags()
+        }
+        const runner = new StreamRunner({ onEvent: pushEvent, scrcpyFlags: scrcpyFlagsRef.current })
         await runner.start(c)
         if (c.backend === "companion")
           camerasRef.current = (await probeCompanionCams(c.serial)) ?? [COMPANION_CAM]
@@ -143,6 +149,12 @@ export function App(props: { onQuit: () => void; autoStart?: boolean }) {
         })
       }}
       onTorchToggle={() => {
+        // scrcpy grew --camera-torch after 3.3; on a build without it the flag is fatal at
+        // startup, so an ungated `t` would trade a light for a stream that never comes back.
+        if (config.backend !== "companion" && !scrcpySupports(scrcpyFlagsRef.current, "--camera-torch")) {
+          pushLog("torch needs a scrcpy with --camera-torch — this build has none")
+          return
+        }
         const next = { ...config, torch: !config.torch }
         // Companion torch applies mid-stream: the service reads a re-run start intent's
         // torch extra on the live capture session, so no restart — scrcpy has no such

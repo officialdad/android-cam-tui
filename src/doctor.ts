@@ -34,6 +34,24 @@ export function parseScrcpyVersion(text: string): [number, number] | null {
   return m ? [Number(m[1]), Number(m[2])] : null
 }
 
+/**
+ * Every long option `scrcpy --help` advertises, from its definition lines — "    --camera-fps=value"
+ * or "    -b, --video-bit-rate=value". Camera flags arrive release by release —
+ * `--camera-torch` and `--camera-zoom` are on upstream master and in no released scrcpy —
+ * and an unrecognized option makes scrcpy exit before it opens the camera, which the
+ * runner can only read as a dead stream and retry forever. Asking scrcpy what it takes is
+ * the only answer that stays right.
+ *
+ * Definitions sit at four spaces and prose wraps at eight or more, so the indent bound is
+ * what separates a real option from one merely named in another's description — scrcpy's
+ * own help for `--new-display` quotes four flags that way.
+ */
+export function parseScrcpyFlags(help: string): string[] {
+  const flags = new Set<string>()
+  for (const m of help.matchAll(/^ {1,4}(?:-[a-zA-Z], )?(--[a-z0-9-]+)/gm)) flags.add(m[1])
+  return [...flags].sort()
+}
+
 export type Level = "block" | "warn"
 
 export interface Check {
@@ -55,6 +73,8 @@ export interface Env {
   /** First of ffplay/mpv/vlc found, for the dashboard's `p` preview. */
   player: string | null
   scrcpyVersion: [number, number] | null
+  /** Long options this scrcpy accepts. Empty when scrcpy is missing — gates nothing then. */
+  scrcpyFlags: string[]
   sinks: SinkInfo[]
   devices: DeviceInfo[]
   distro: Distro
@@ -349,11 +369,12 @@ const PLAYERS = ["ffplay", "mpv", "vlc"]
 /** Never rejects: every failure becomes a null field, so the doctor is always renderable. */
 export async function probeEnv(): Promise<Env> {
   const scrcpy = Bun.which("scrcpy")
-  const [sinks, devices, osRelease, versionText] = await Promise.all([
+  const [sinks, devices, osRelease, versionText, helpText] = await Promise.all([
     probeSinks(),
     listDevices(),
     Bun.file("/etc/os-release").text().catch(() => ""),
     scrcpy ? run([scrcpy, "--version"]) : Promise.resolve(""),
+    scrcpy ? run([scrcpy, "--help"]) : Promise.resolve(""),
   ])
   // Only phones that provably answered below the floor need the companion app, so nothing
   // else is asked and nothing is written on a modern-phone-only machine.
@@ -375,11 +396,24 @@ export async function probeEnv(): Promise<Env> {
     ffmpeg: Bun.which("ffmpeg"),
     player: PLAYERS.map((p) => Bun.which(p)).find((p) => p !== null) ?? null,
     scrcpyVersion: parseScrcpyVersion(versionText),
+    scrcpyFlags: parseScrcpyFlags(helpText),
     sinks,
     devices,
     distro: detectDistro(osRelease),
     apkPath,
   }
+}
+
+/**
+ * The spawn wrapper around `parseScrcpyFlags`, for callers outside `probeEnv` — `--start`
+ * skips the setup screen and so never sees an `Env`. `run` swallows a missing binary, and
+ * an empty help text parses to no flags, which would gate away every optional flag; null
+ * says "unprobed" instead, and `buildArgs` then emits them as before.
+ */
+export async function probeScrcpyFlags(scrcpyPath = "scrcpy"): Promise<string[] | null> {
+  const help = await run([scrcpyPath, "--help"])
+  const flags = parseScrcpyFlags(help)
+  return flags.length > 0 ? flags : null
 }
 
 async function run(cmd: string[]): Promise<string> {

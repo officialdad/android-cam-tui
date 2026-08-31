@@ -66,7 +66,22 @@ export function cropFor(size: string, aspect: StreamConfig["aspect"]): string | 
   return `${cw}:${ch}:${even((w - cw) / 2)}:${even((h - ch) / 2)}`
 }
 
-export function buildArgs(c: StreamConfig): string[] {
+/**
+ * Options scrcpy only grew on some release. Passing one an older scrcpy does not know is
+ * fatal — it exits on the unrecognized option — so `buildArgs` drops them unless the
+ * probed flag list says otherwise. Everything outside this set has been there since 3.0
+ * and is emitted unconditionally, so a mis-parsed help text cannot strip the stream's
+ * essentials. See `parseScrcpyFlags` in doctor.ts.
+ */
+const OPTIONAL_FLAGS = ["--camera-zoom", "--camera-torch"] as const
+
+export function scrcpySupports(flags: string[] | null, flag: string): boolean {
+  if (!(OPTIONAL_FLAGS as readonly string[]).includes(flag)) return true
+  return flags === null ? true : flags.includes(flag)
+}
+
+/** `flags` is `probeEnv().scrcpyFlags`; null means "unprobed, emit everything". */
+export function buildArgs(c: StreamConfig, flags: string[] | null = null): string[] {
   const args = [
     "--video-source=camera",
     `--camera-id=${c.cameraId}`,
@@ -75,14 +90,17 @@ export function buildArgs(c: StreamConfig): string[] {
     `--video-bit-rate=${c.bitrate}`,
     `--v4l2-sink=${c.sink}`,
     "--no-window",
-    "--stay-awake",
     "--no-audio",
+    // No --stay-awake: it requires control, `--video-source=camera` disables control, and
+    // scrcpy rejects the pair outright ("Cannot request to stay awake if control is
+    // disabled") before it opens the camera. Nothing is being mirrored, so there is no
+    // screen to keep awake either.
   ]
   const crop = cropFor(c.size, c.aspect)
   if (crop) args.push(`--crop=${crop}`)
   if (c.highSpeed) args.push("--camera-high-speed")
-  if (c.zoom !== null) args.push(`--camera-zoom=${c.zoom}`)
-  if (c.torch) args.push("--camera-torch")
+  if (c.zoom !== null && scrcpySupports(flags, "--camera-zoom")) args.push(`--camera-zoom=${c.zoom}`)
+  if (c.torch && scrcpySupports(flags, "--camera-torch")) args.push("--camera-torch")
   if (c.serial !== null) args.push("-s", c.serial)
   if (c.orientation !== "0") args.push(`--capture-orientation=${c.orientation}`)
   if (c.v4l2Buffer > 0) args.push(`--v4l2-buffer=${c.v4l2Buffer}`)
