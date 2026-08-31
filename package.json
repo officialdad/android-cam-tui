@@ -1,6 +1,6 @@
 {
   "name": "android-cam-tui",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Terminal UI for using an Android phone as a Linux webcam, via scrcpy and v4l2loopback",
   "license": "MIT",
   "author": "opariffazman",
@@ -27,8 +27,8 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@opentui/core": "^0.5.1",
-    "@opentui/react": "^0.5.1",
+    "@opentui/core": "^0.5.9",
+    "@opentui/react": "^0.5.9",
     "react": "^19.2.8"
   }
 }
