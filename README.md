@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/logo.png" alt="android-cam-tui logo: a camera aperture with a &gt;_ terminal prompt, above the word cameraTUI" width="320"></p>
+
 # android-cam-tui
 
 [![ci](https://github.com/officialdad/android-cam-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/officialdad/android-cam-tui/actions/workflows/ci.yml)
